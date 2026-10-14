@@ -1186,6 +1186,7 @@
             }
           }
         },
+        "description": "PAUSED or desired PAUSED rejects PUBLISH/ROLLBACK with SITE_PAUSED. Explicit sites:manage resume is required before publication.",
         "parameters": [
           {
             "name": "site",
@@ -1442,6 +1443,7 @@
             }
           }
         },
+        "description": "RESUME requires sites:manage; optional deploymentId selects a same-site READY/AVAILABLE replacement and requires its inspectionReportHash and warning acknowledgement.",
         "parameters": [
           {
             "name": "site",
@@ -2235,6 +2237,17 @@
               }
             ]
           },
+          "desiredDeploymentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "url": {
             "type": "string",
             "format": "uri"
@@ -2483,6 +2496,23 @@
           "errorMessage": {
             "type": "string"
           },
+          "autoPublicationId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "autoPublishErrorCode": {
+            "type": "string"
+          },
+          "autoPublishErrorMessage": {
+            "type": "string"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -2613,6 +2643,16 @@
           },
           "confirmSlug": {
             "type": "string"
+          },
+          "deploymentId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "inspectionReportHash": {
+            "type": "string"
+          },
+          "acknowledgeWarnings": {
+            "type": "boolean"
           }
         },
         "required": [

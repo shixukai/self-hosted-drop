@@ -71,6 +71,7 @@ import {
   date,
   siteKind,
   busyStatuses,
+  publicationBlockedReason,
   APIError,
   type Site,
   type Deployment,
@@ -158,6 +159,7 @@ export default function SiteDetail({
   if (site.isPending) return <Loading />;
   if (site.error || !s) return <ErrorNote error={site.error || "站点不存在"} />;
   const current = deployments.find((d) => d.id === s.appliedDeploymentId);
+  const publicationBlocked = publicationBlockedReason(s);
   async function runOperation() {
     if (!confirm || !s) return;
     const { op, deployment: d } = confirm;
@@ -179,7 +181,15 @@ export default function SiteDetail({
       await refresh();
       return;
     }
-    if (d)
+    if (d && op === "resume") {
+      p = await mutate("/sites/" + id + "/resume", {
+        deploymentId: d.id,
+        expectedGeneration: s.generation,
+        inspectionReportHash: d.report.inspectionReportHash,
+        acknowledgeWarnings: true,
+      });
+    } else if (d) {
+      if (publicationBlocked) throw new Error(publicationBlocked);
       p = await mutate("/sites/" + id + "/publications", {
         deploymentId: d.id,
         action: op === "rollback" ? "ROLLBACK" : "PUBLISH",
@@ -187,7 +197,7 @@ export default function SiteDetail({
         inspectionReportHash: d.report.inspectionReportHash,
         acknowledgeWarnings: true,
       });
-    else
+    } else
       p = await mutate(
         "/sites/" + id + (op === "delete" ? "" : "/" + op),
         {
@@ -289,6 +299,11 @@ export default function SiteDetail({
         )}
       </div>
       <ErrorNote error={action.error || list.error} />
+      {publicationBlocked && s.status !== "DELETED" && (
+        <div id="publication-blocked" className="info-note" role="status">
+          {publicationBlocked}
+        </div>
+      )}
       {s.generation !== s.appliedGeneration && (
         <div className="info-note">
           最近一次操作尚未生效或已失败。当前公开内容以已生效版本为准。
@@ -418,11 +433,29 @@ export default function SiteDetail({
                             受控预览
                             <ArrowUpRight size={14} />
                           </Button>
-                          {s.appliedDeploymentId !== d.id &&
-                            s.status !== "DELETED" && (
+                          {s.status === "PAUSED" &&
+                          s.desiredStatus !== "DELETED" ? (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              isDisabled={action.busy}
+                              onPress={() =>
+                                setConfirm({ op: "resume", deployment: d })
+                              }
+                            >
+                              以此版本恢复服务
+                            </Button>
+                          ) : s.appliedDeploymentId !== d.id &&
+                            s.status !== "DELETED" ? (
                               <Button
                                 size="sm"
                                 variant="secondary"
+                                isDisabled={!!publicationBlocked || action.busy}
+                                aria-describedby={
+                                  publicationBlocked
+                                    ? "publication-blocked"
+                                    : undefined
+                                }
                                 onPress={() =>
                                   d.report.warnings?.length
                                     ? nav(
@@ -443,7 +476,7 @@ export default function SiteDetail({
                                   ? "回滚到此版本"
                                   : "发布此版本"}
                               </Button>
-                            )}
+                            ) : null}
                           <Button
                             size="sm"
                             variant="ghost"
@@ -512,7 +545,9 @@ export default function SiteDetail({
           title={
             {
               pause: "暂停公开访问？",
-              resume: "恢复公开访问？",
+              resume: confirm.deployment
+                ? "以此版本恢复公开访问？"
+                : "恢复公开访问？",
               delete: "将站点移入回收站？",
               restore: "恢复这个站点？",
               purge: "永久回收站点文件？",
@@ -526,7 +561,25 @@ export default function SiteDetail({
           body={
             {
               pause: "所有公开资源将暂时不可访问，现有预览授权会失效。",
-              resume: "验证最近正式版本后，恢复原有公开网址。",
+              resume: confirm.deployment
+                ? "验证所选版本后，以该版本恢复原有公开网址，任何知道地址的人都可以访问。" +
+                  (confirm.deployment.report.warnings?.length
+                    ? "检查报告包含 " +
+                      confirm.deployment.report.warnings.length +
+                      " 项警告：" +
+                      confirm.deployment.report.warnings
+                        .map(
+                          (warning) =>
+                            warning.file +
+                            " → " +
+                            warning.reference +
+                            "：" +
+                            warning.message,
+                        )
+                        .join("；") +
+                      "。确认即表示已阅读警告并同意恢复公开访问。"
+                    : "")
+                : "验证最近正式版本后，恢复原有公开网址。",
               delete: "站点会停止公开访问，进入回收期；原地址继续保留。",
               restore: "恢复后保持暂停，你可以再决定是否恢复服务。",
               purge:

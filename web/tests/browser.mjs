@@ -129,6 +129,74 @@ try {
       ),
     { timeout: 30000 },
   );
+  await click("暂停");
+  await click("确认");
+  await page.waitForSelector('[role="dialog"]', { hidden: true });
+  await page.waitForSelector("#publication-blocked");
+  await page.goto(base + "/upload?site=" + siteID, {
+    waitUntil: "networkidle0",
+  });
+  const replacement = path.join(temporary, "browser-resume.html");
+  await fs.writeFile(
+    replacement,
+    '<!doctype html><meta charset="utf-8"><h1>Explicit replacement resume verified</h1>',
+  );
+  await (
+    await page.$("input[type=file]:not([multiple])")
+  ).uploadFile(replacement);
+  await click("上传并检查");
+  await page.waitForFunction(
+    () => document.body.textContent.includes("检查完成，再确认一下。"),
+    { timeout: 60000 },
+  );
+  assert.match(
+    await page.$eval("#publication-blocked", (e) => e.textContent),
+    /站点已暂停/,
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        [...document.querySelectorAll("button")].find(
+          (b) => b.textContent.trim() === "确认公开发布",
+        )?.disabled,
+    ),
+    true,
+    "A READY replacement must not implicitly reopen a paused site",
+  );
+  await page.goto(base + "/sites/" + siteID, { waitUntil: "networkidle0" });
+  await page.waitForSelector(".release-row");
+  const resumeButton = await page.evaluateHandle(() => {
+    const row = [...document.querySelectorAll(".release-row")].find((row) =>
+      row.textContent.includes("browser-resume.html"),
+    );
+    return [...(row?.querySelectorAll("button") || [])].find(
+      (button) => button.textContent.trim() === "以此版本恢复服务",
+    );
+  });
+  assert(
+    resumeButton.asElement(),
+    "The replacement needs an explicit resume action",
+  );
+  await resumeButton.asElement().click();
+  await resumeButton.dispose();
+  await page.waitForSelector("[role=dialog]");
+  assert.match(
+    await page.$eval("[role=dialog]", (e) => e.textContent),
+    /以此版本恢复公开访问/,
+  );
+  await click("确认");
+  await page.waitForSelector('[role="dialog"]', { hidden: true });
+  await page.waitForFunction(
+    () => !document.querySelector("#publication-blocked"),
+    { timeout: 30000 },
+  );
+  const resumedPage = await browser.newPage();
+  await resumedPage.goto(url);
+  assert.equal(
+    await resumedPage.$eval("h1", (e) => e.textContent),
+    "Explicit replacement resume verified",
+  );
+  await resumedPage.close();
   await verifyFolderUpload(page, browser, temporary, base, click);
   for (const route of ["/", "/deployments", "/tokens", "/system", "/upload"]) {
     await page.goto(base + route, { waitUntil: "networkidle0" });
@@ -188,6 +256,7 @@ try {
         "public content",
         "preview fragment exchange",
         "pause and resume dialogs",
+        "paused upload cannot publish; explicit selected-version resume",
         "native folder drop with 108 files and nested assets",
         "directory picker with one nested file",
         "empty folder and required-field feedback",

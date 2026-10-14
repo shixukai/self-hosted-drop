@@ -71,6 +71,7 @@ import {
   date,
   siteKind,
   busyStatuses,
+  publicationBlockedReason,
   APIError,
   type Site,
   type Deployment,
@@ -137,10 +138,39 @@ export default function UploadPage() {
     queryKey: ["deployment", deploymentId],
     queryFn: () => api<Deployment>("/deployments/" + deploymentId),
     enabled: !!deploymentId,
-    refetchInterval: (q) =>
-      q.state.data && busyStatuses.includes(q.state.data.status) ? 1000 : false,
+    refetchInterval: (q) => {
+      const value = q.state.data;
+      return value &&
+        (busyStatuses.includes(value.status) ||
+          (value.status === "READY" &&
+            value.metadata.publishAfterReady &&
+            !value.autoPublicationId &&
+            !value.autoPublishErrorCode))
+        ? 1000
+        : false;
+    },
   });
   const d = deployment.data;
+  const autoPublication = useQuery({
+    queryKey: ["publication", d?.autoPublicationId],
+    queryFn: () => api<Publication>("/publications/" + d!.autoPublicationId),
+    enabled: !!d?.autoPublicationId,
+    refetchInterval: (q) =>
+      q.state.data &&
+      !["APPLIED", "FAILED", "CONFLICT", "CANCELED"].includes(q.state.data.status)
+        ? 1000
+        : false,
+  });
+  const autoPublishing =
+    !!d?.metadata.publishAfterReady &&
+    !d.autoPublishErrorCode &&
+    (!autoPublication.data ||
+      !["APPLIED", "FAILED", "CONFLICT", "CANCELED"].includes(
+        autoPublication.data.status,
+      ));
+  const publicationBlocked = site.data
+    ? publicationBlockedReason(site.data)
+    : "";
   useEffect(() => {
     if (site.data) {
       setName(site.data.name);
@@ -272,6 +302,9 @@ export default function UploadPage() {
     if (!d) return;
     await action.run(async () => {
       const s = await api<Site>("/sites/" + d.siteId);
+      qc.setQueryData(["site", s.id], s);
+      const blocked = publicationBlockedReason(s);
+      if (blocked) throw new Error(blocked);
       const p = await mutate<Publication>("/sites/" + s.id + "/publications", {
         deploymentId: d.id,
         expectedGeneration: s.generation,
@@ -348,6 +381,30 @@ export default function UploadPage() {
                     <h2>{messages[d.status] || d.status}</h2>
                     <p>{d.filename || "静态站点版本"}</p>
                     <Status value={d.status} />
+                    {d.status === "READY" && d.metadata.publishAfterReady && (
+                      <>
+                        {d.autoPublishErrorCode ? (
+                          <ErrorNote
+                            error={
+                              "自动发布未执行：" +
+                              (d.autoPublishErrorMessage || d.autoPublishErrorCode)
+                            }
+                          />
+                        ) : autoPublication.data ? (
+                          <>
+                            <p role="status">
+                              自动发布：
+                              {messages[autoPublication.data.status] ||
+                                autoPublication.data.status}
+                            </p>
+                            <ErrorNote error={autoPublication.data.errorMessage} />
+                          </>
+                        ) : (
+                          <p role="status">自动发布正在处理。</p>
+                        )}
+                        <ErrorNote error={autoPublication.error} />
+                      </>
+                    )}
                     {busyStatuses.includes(d.status) && (
                       <>
                         <p>
@@ -665,12 +722,26 @@ export default function UploadPage() {
               </strong>
               <p>后续更新，网址保持不变。</p>
             </div>
+            {publicationBlocked && (
+              <p id="publication-blocked" className="field-help" role="status">
+                {publicationBlocked}{" "}
+                <Link to={"/sites/" + siteId}>查看站点</Link>
+              </p>
+            )}
             {d?.status === "READY" ? (
               <Button
                 fullWidth
                 size="lg"
                 isPending={action.busy}
-                isDisabled={!!d.report.warnings?.length && !ack}
+                isDisabled={
+                  !site.data ||
+                  !!publicationBlocked ||
+                  autoPublishing ||
+                  (!!d.report.warnings?.length && !ack)
+                }
+                aria-describedby={
+                  publicationBlocked ? "publication-blocked" : undefined
+                }
                 onPress={publish}
               >
                 确认公开发布

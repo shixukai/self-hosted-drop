@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"github.com/shixukai/self-hosted-drop/internal/app"
 	"github.com/shixukai/self-hosted-drop/internal/config"
@@ -79,6 +81,23 @@ func run() error {
 		return a.Backup(ctx)
 	case "doctor":
 		return a.Doctor(ctx)
+	case "reconcile":
+		flags := flag.NewFlagSet("reconcile", flag.ContinueOnError)
+		mode := flags.String("mode", "inspect", "inspect, complete, or restore-applied")
+		hash := flags.String("expected-config-hash", "", "gatewayConfigHash from the preceding inspection")
+		if e = flags.Parse(os.Args[2:]); e != nil {
+			return e
+		}
+		if flags.NArg() != 1 {
+			return fmt.Errorf("usage: drop reconcile [--mode complete|restore-applied --expected-config-hash SHA256] publication-id")
+		}
+		recoveryCtx, finish := context.WithTimeout(ctx, 10*time.Minute)
+		defer finish()
+		report, err := a.Reconcile(recoveryCtx, flags.Arg(0), app.ReconcileOptions{Mode: *mode, ExpectedConfigHash: *hash})
+		if e = json.NewEncoder(os.Stdout).Encode(report); e != nil {
+			return e
+		}
+		return err
 	case "gc":
 		return a.GC(ctx, len(os.Args) > 2 && os.Args[2] == "--dry-run")
 	case "serve":

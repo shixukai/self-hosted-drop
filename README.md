@@ -49,14 +49,19 @@ cat .secrets/setup.key
 docker compose ps
 docker compose logs --tail 100 app worker
 
-# 核对数据库、正式路由、文件校验和内容响应。
+# 核对数据库、正式路由、文件/内容，以及待处理发布和期望状态漂移。
 docker compose exec -T app drop-entrypoint drop doctor
+
+# 遇到未知发布状态时只读检查；核验后的恢复步骤见运行与部署手册。
+docker compose exec -T app drop-entrypoint drop reconcile "<publication-id>"
 
 # 停止服务并保留数据卷。
 docker compose down
 ```
 
 正式接入 `douyacn.com` 前请执行[运行与部署手册](docs/运行与部署.md)中的 HTTPS、Host 转发、Cookie 和恢复检查。默认 Compose 仅将后台和公开内容端口绑定至本机回环地址。
+
+`reconcile` 默认只读，报告目标/已应用配置匹配情况与当前配置哈希。已观测到完整目标配置时可选 complete；恢复已应用基线时选 restore-applied。两个写入模式均需刚读取的哈希与完整核验，未确认结果保持全局阻断；complete 可在重新检查后退回 restore-applied，已选恢复基线时不能反向完成原目标。命令见运行与部署 4.2 节。
 
 ## 3. 自动上传
 
@@ -69,6 +74,10 @@ python3 scripts/drop-upload.py ./dist.zip --site my-report --publish
 ```
 
 脚本分块上传并输出 JSON。默认遇到检查警告时停止发布，退出码为 `4`；确认依赖后才使用 `--allow-warnings`。多入口 ZIP 可传 `--root dist --entry index.html`，SPA 使用 `--mode spa`。
+
+同一文件和元数据默认复用上传幂等键，终态也会返回原 Deployment。显式使用 `--retry-failed` 时，脚本只有观察到 FAILED/CANCELED 才以新键尝试一次；该选项不能与 `--idempotency-key` 同用。连接中断或结果未知时保留错误 JSON 中的 `idempotencyKey` 重试，不自动创建下一次尝试。发布请求的键另包含站点 generation，脚本最终以 Publication 的 APPLIED 为成功依据。
+
+暂停站点拒绝普通发布、回滚和自动发布。恢复需 `sites:manage` 权限；旧版本不可用或没有旧正式版本时，管理员可在暂停站点的 READY 历史版本上明确选择“以此版本恢复服务”，确认检查报告与警告后等待恢复 Publication 的 APPLIED。
 
 完整接口见 [OpenAPI 3.1](api/openapi.json) 和[实现与验收说明](docs/实现与验收.md)。
 

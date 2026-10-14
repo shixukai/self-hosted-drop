@@ -139,8 +139,11 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			a.DB.Exec(ctx, "UPDATE deployments SET status='FAILED',error_code='UPLOAD_INTERRUPTED',error_message='上传未完整接收',updated_at=now() WHERE id=$1 AND status='RECEIVING'", did)
-			os.RemoveAll(dir)
-			a.DB.Exec(ctx, "DELETE FROM quota_reservations WHERE deployment_id=$1", did)
+			if cleanupErr := os.RemoveAll(dir); cleanupErr != nil {
+				a.Log.Warn("interrupted upload cleanup postponed", "deploymentId", did, "error", cleanupErr.Error())
+			} else {
+				a.DB.Exec(ctx, "DELETE FROM quota_reservations WHERE deployment_id=$1", did)
+			}
 		}
 	}()
 	if e = os.Mkdir(dir, 0750); e != nil {
@@ -183,13 +186,27 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	if reused != "" {
-		if e = tx.Commit(r.Context()); e != nil {
-			return e
-		}
-		d, e := scanDeployment(a.DB.QueryRow(r.Context(), "SELECT "+deploymentFields+" FROM deployments WHERE id=$1", reused))
+		d, e := scanDeployment(tx.QueryRow(r.Context(), "SELECT "+deploymentFields+" FROM deployments WHERE id=$1", reused))
 		if e != nil {
 			return e
 		}
+		if e = os.RemoveAll(dir); e != nil {
+			return e
+		}
+		if _, e = tx.Exec(r.Context(), "DELETE FROM quota_reservations WHERE deployment_id=$1", did); e != nil {
+			return e
+		}
+		removed, e := tx.Exec(r.Context(), "DELETE FROM deployments WHERE id=$1 AND status='RECEIVING'", did)
+		if e != nil {
+			return e
+		}
+		if removed.RowsAffected() != 1 {
+			return apiError(409, "INVALID_STATE", "重放上传的临时记录已变化，请保留原幂等键重试")
+		}
+		if e = tx.Commit(r.Context()); e != nil {
+			return e
+		}
+		success = true
 		writeJSON(w, 202, d)
 		return nil
 	}

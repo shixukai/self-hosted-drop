@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ type Config struct {
 	MaxUpload, MaxExpanded, MaxFile, Quota, DiskReserve                                                                  int64
 	MaxFiles, MaxDepth, QueueLimit, Concurrency, RetainVersions, TrashDays                                               int
 	ProcessTimeout                                                                                                       time.Duration
+	TrustedProxyCIDRs                                                                                                    []netip.Prefix
 }
 
 func env(k, d string) string {
@@ -48,6 +50,10 @@ func secret(k string) (string, error) {
 func Load() (Config, error) {
 	c := Config{DatabaseURL: os.Getenv("DROP_DATABASE_URL"), DataDir: env("DROP_DATA_DIR", ".data"), WebDir: env("DROP_WEB_DIR", "web/dist"), AdminOrigin: env("DROP_ADMIN_ORIGIN", "https://drop-admin.douyacn.com"), ContentDomain: env("DROP_CONTENT_DOMAIN", "drop.douyacn.com"), PublicScheme: "https", Listen: env("DROP_LISTEN", "127.0.0.1:18180"), InternalListen: env("DROP_INTERNAL_LISTEN", "127.0.0.1:18181"), CaddyAdmin: env("DROP_CADDY_ADMIN", "http://127.0.0.1:2019"), CaddyContent: env("DROP_CADDY_CONTENT", "http://127.0.0.1:18080"), WorkerURL: env("DROP_WORKER_URL", "http://127.0.0.1:18182"), Development: os.Getenv("DROP_DEVELOPMENT_MODE") == "true", MaxUpload: number("DROP_MAX_UPLOAD_BYTES", 200<<20), MaxExpanded: number("DROP_MAX_EXPANDED_BYTES", 1<<30), MaxFile: number("DROP_MAX_FILE_BYTES", 100<<20), Quota: number("DROP_QUOTA_BYTES", 20<<30), DiskReserve: number("DROP_DISK_RESERVE_BYTES", 5<<30), MaxFiles: int(number("DROP_MAX_FILES", 10000)), MaxDepth: 20, QueueLimit: 20, Concurrency: 2, RetainVersions: 10, TrashDays: 7, ProcessTimeout: 120 * time.Second}
 	var err error
+	c.TrustedProxyCIDRs, err = ParseTrustedProxies(os.Getenv("DROP_TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return c, err
+	}
 	c.DataDir, err = filepath.Abs(c.DataDir)
 	if err != nil {
 		return c, err
@@ -110,6 +116,29 @@ func Load() (Config, error) {
 		}
 	}
 	return c, nil
+}
+func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
+	trusted := []netip.Prefix{}
+	if strings.TrimSpace(value) == "" {
+		return trusted, nil
+	}
+	for _, part := range strings.Split(value, ",") {
+		part = strings.TrimSpace(part)
+		prefix, e := netip.ParsePrefix(part)
+		if e != nil {
+			address, err := netip.ParseAddr(part)
+			if err != nil || address.Zone() != "" {
+				return nil, errors.New("invalid DROP_TRUSTED_PROXY_CIDRS")
+			}
+			address = address.Unmap()
+			prefix = netip.PrefixFrom(address, address.BitLen())
+		}
+		if prefix.Bits() == 0 {
+			return nil, errors.New("DROP_TRUSTED_PROXY_CIDRS cannot trust every address")
+		}
+		trusted = append(trusted, prefix.Masked())
+	}
+	return trusted, nil
 }
 func localHost(h string) bool {
 	if i := strings.IndexByte(h, ':'); i >= 0 {

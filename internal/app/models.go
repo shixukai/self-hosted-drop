@@ -29,25 +29,28 @@ type Site struct {
 	Bytes               int64      `json:"bytes"`
 }
 type Deployment struct {
-	ID            string           `json:"id"`
-	SiteID        string           `json:"siteId"`
-	Status        string           `json:"status"`
-	ArtifactState string           `json:"artifactState"`
-	InputHash     string           `json:"inputHash"`
-	ArtifactHash  string           `json:"artifactHash"`
-	Filename      string           `json:"filename"`
-	Metadata      archive.Metadata `json:"metadata"`
-	Report        archive.Result   `json:"report"`
-	Files         []archive.File   `json:"files"`
-	ReceivedBytes int64            `json:"receivedBytes"`
-	ExpandedBytes int64            `json:"expandedBytes"`
-	FileCount     int              `json:"fileCount"`
-	ErrorCode     string           `json:"errorCode"`
-	ErrorMessage  string           `json:"errorMessage"`
-	CreatedBy     string           `json:"createdBy"`
-	Pinned        bool             `json:"pinned"`
-	CreatedAt     time.Time        `json:"createdAt"`
-	UpdatedAt     time.Time        `json:"updatedAt"`
+	ID                      string           `json:"id"`
+	SiteID                  string           `json:"siteId"`
+	Status                  string           `json:"status"`
+	ArtifactState           string           `json:"artifactState"`
+	InputHash               string           `json:"inputHash"`
+	ArtifactHash            string           `json:"artifactHash"`
+	Filename                string           `json:"filename"`
+	Metadata                archive.Metadata `json:"metadata"`
+	Report                  archive.Result   `json:"report"`
+	Files                   []archive.File   `json:"files"`
+	ReceivedBytes           int64            `json:"receivedBytes"`
+	ExpandedBytes           int64            `json:"expandedBytes"`
+	FileCount               int              `json:"fileCount"`
+	ErrorCode               string           `json:"errorCode"`
+	ErrorMessage            string           `json:"errorMessage"`
+	AutoPublicationID       *string          `json:"autoPublicationId"`
+	AutoPublishErrorCode    string           `json:"autoPublishErrorCode"`
+	AutoPublishErrorMessage string           `json:"autoPublishErrorMessage"`
+	CreatedBy               string           `json:"createdBy"`
+	Pinned                  bool             `json:"pinned"`
+	CreatedAt               time.Time        `json:"createdAt"`
+	UpdatedAt               time.Time        `json:"updatedAt"`
 }
 type Publication struct {
 	ID                 string     `json:"id"`
@@ -111,12 +114,12 @@ func scanSite(row scanner) (Site, error) {
 	return s, e
 }
 
-const deploymentFields = `id,site_id,status,artifact_state,input_hash,artifact_hash,filename,metadata,report,files,received_bytes,expanded_bytes,file_count,error_code,error_message,created_by,pinned,created_at,updated_at`
+const deploymentFields = `id,site_id,status,artifact_state,input_hash,artifact_hash,filename,metadata,report,files,received_bytes,expanded_bytes,file_count,error_code,error_message,created_by,pinned,created_at,updated_at,auto_publication_id,auto_publish_error_code,auto_publish_error_message`
 
 func scanDeployment(row scanner) (Deployment, error) {
 	var d Deployment
 	var m, r, f []byte
-	e := row.Scan(&d.ID, &d.SiteID, &d.Status, &d.ArtifactState, &d.InputHash, &d.ArtifactHash, &d.Filename, &m, &r, &f, &d.ReceivedBytes, &d.ExpandedBytes, &d.FileCount, &d.ErrorCode, &d.ErrorMessage, &d.CreatedBy, &d.Pinned, &d.CreatedAt, &d.UpdatedAt)
+	e := row.Scan(&d.ID, &d.SiteID, &d.Status, &d.ArtifactState, &d.InputHash, &d.ArtifactHash, &d.Filename, &m, &r, &f, &d.ReceivedBytes, &d.ExpandedBytes, &d.FileCount, &d.ErrorCode, &d.ErrorMessage, &d.CreatedBy, &d.Pinned, &d.CreatedAt, &d.UpdatedAt, &d.AutoPublicationID, &d.AutoPublishErrorCode, &d.AutoPublishErrorMessage)
 	if e != nil {
 		return d, e
 	}
