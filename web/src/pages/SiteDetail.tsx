@@ -291,7 +291,7 @@ export default function SiteDetail({
       <ErrorNote error={action.error || list.error} />
       {s.generation !== s.appliedGeneration && (
         <div className="info-note">
-          最近一次路由操作尚未生效或已失败。当前公开内容以已生效版本为准。
+          最近一次操作尚未生效或已失败。当前公开内容以已生效版本为准。
         </div>
       )}
       <div className="history-layout">
@@ -305,7 +305,9 @@ export default function SiteDetail({
               <Status value={s.status} />
             </div>
             <h3>
-              {s.appliedDeploymentId ? "v" + s.appliedGeneration : "尚未发布"}
+              {s.appliedDeploymentId
+                ? s.appliedDeploymentId.slice(0, 8)
+                : "尚未发布"}
             </h3>
             <p>
               {current?.metadata.message ||
@@ -480,7 +482,7 @@ export default function SiteDetail({
       </div>
       <section className="publication-log">
         <div className="section-heading">
-          <h2>路由操作</h2>
+          <h2>发布与访问记录</h2>
           <span>最近 10 次</span>
         </div>
         <ErrorNote error={publications.error} />
@@ -496,7 +498,7 @@ export default function SiteDetail({
                   DELETE: "移入回收站",
                   RESTORE: "恢复站点",
                 }[p.action] || p.action}{" "}
-                · v{p.targetGeneration}
+                · 第 {p.targetGeneration} 次操作
               </strong>
               <small>{date(p.createdAt)}</small>
               {p.errorMessage && <p>{p.errorMessage}</p>}

@@ -272,8 +272,8 @@ export default function Sites({
                     <Card.Footer className="project-footer">
                       <span>
                         <span className="version-tag">
-                          {s.appliedGeneration
-                            ? "v" + s.appliedGeneration
+                          {s.appliedDeploymentId
+                            ? s.appliedDeploymentId.slice(0, 8)
                             : "草稿"}
                         </span>
                         {date(s.updatedAt)}
