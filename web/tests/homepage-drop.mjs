@@ -115,7 +115,100 @@ export async function verifyHomepageDrop(page, browser, temporary, base, click) 
     siteID = undefined;
   }
 
+  async function readingDoesNotOverrideLazyNavigation() {
+    const folder = path.join(temporary, "home-navigation-" + unique);
+    await fs.mkdir(folder);
+    await fs.writeFile(path.join(folder, "index.html"), "<h1>Navigation test</h1>");
+    // Real filesystem callbacks keep a read pending long enough to click the
+    // destination. The lazy JavaScript request is held, not the directory API.
+    for (let i = 0; i < 1500; i++)
+      await fs.writeFile(path.join(folder, `asset-${i}.txt`), `navigation ${i}`);
+
+    let heldRequest;
+    let timeout;
+    let resolveSystemRequest;
+    const systemRequest = new Promise((resolve) => {
+      resolveSystemRequest = resolve;
+    });
+    const requestErrors = [];
+    const onRequest = async (request) => {
+      if (request.isInterceptResolutionHandled()) return;
+      const url = new URL(request.url());
+      if (
+        !heldRequest &&
+        url.origin === new URL(base).origin &&
+        request.resourceType() === "script" &&
+        /\/SystemPage(?:-[^/]*)?\.(?:js|tsx)$/.test(url.pathname)
+      ) {
+        heldRequest = request;
+        resolveSystemRequest();
+        return;
+      }
+      try {
+        await request.continue();
+      } catch (error) {
+        requestErrors.push(error.message);
+      }
+    };
+    await page.setCacheEnabled(false);
+    await page.setRequestInterception(true);
+    page.on("request", onRequest);
+    try {
+      // Reload gives SystemPage a fresh module registry even if another test
+      // previously visited it. Browser cache cannot bypass the interception.
+      await home();
+      await drop(folder);
+      await page.waitForSelector('.drop-launch[aria-busy="true"]');
+      await click("系统");
+      await Promise.race([
+        systemRequest,
+        new Promise((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("SystemPage lazy request was not intercepted")),
+            30000,
+          );
+        }),
+      ]);
+      await page.waitForFunction(() => location.pathname === "/system");
+      assert(
+        await page.$(".drop-launch"),
+        "Suspense must retain the old homepage while SystemPage is loading",
+      );
+      await page.waitForFunction(
+        () =>
+          location.pathname !== "/system" ||
+          document.querySelector(".drop-launch")?.getAttribute("aria-busy") ===
+            "false",
+        { timeout: 60000 },
+      );
+      assert.equal(
+        new URL(page.url()).pathname,
+        "/system",
+        "Completing an old homepage read must not navigate away from SystemPage",
+      );
+      assert.equal(await page.$(".file-selection"), null);
+      await heldRequest.continue();
+      heldRequest = undefined;
+      await page.waitForFunction(() =>
+        document.querySelector("h1")?.textContent.includes("所有状态"),
+      );
+      assert.equal(new URL(page.url()).pathname, "/system");
+      assert.deepEqual(requestErrors, []);
+    } finally {
+      clearTimeout(timeout);
+      try {
+        if (heldRequest && !heldRequest.isInterceptResolutionHandled())
+          await heldRequest.continue();
+      } finally {
+        await page.setRequestInterception(false);
+        page.off("request", onRequest);
+        await page.setCacheEnabled(true);
+      }
+    }
+  }
+
   try {
+    await readingDoesNotOverrideLazyNavigation();
     const empty = path.join(temporary, "homepage-empty-" + unique);
     await fs.mkdir(empty);
     const unsupported = path.join(temporary, "homepage-unsupported.txt");

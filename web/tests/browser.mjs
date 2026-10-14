@@ -100,6 +100,28 @@ try {
   await publicPage.close();
   await click("查看站点");
   await page.waitForSelector(".release-row");
+  const publicSiteURL = await page.$eval(
+    ".release-public-actions a",
+    (el) => el.getAttribute("href"),
+  );
+  assert.equal(new URL(publicSiteURL).href, url);
+  await browser.defaultBrowserContext().overridePermissions(base, [
+    "clipboard-read",
+    "clipboard-write",
+    "clipboard-sanitized-write",
+  ]);
+  await page.$eval('button[aria-label="复制公开链接"]', (el) =>
+    el.scrollIntoView({ block: "center", behavior: "instant" }),
+  );
+  await page.click('button[aria-label="复制公开链接"]');
+  await page.waitForFunction(() =>
+    document.body.textContent.includes("链接已复制"),
+  );
+  assert.equal(
+    await page.evaluate(() => navigator.clipboard.readText()),
+    publicSiteURL,
+    "The copy action must write the complete public site URL",
+  );
   await click("受控预览");
   await page.waitForSelector("[role=dialog] a");
   const previewURL = await page.$eval("[role=dialog] a", (a) => a.href);
@@ -260,6 +282,7 @@ try {
         "UI login",
         "HTML upload and publish",
         "public content",
+        "public URL copy writes the complete URL to the isolated clipboard",
         "preview fragment exchange",
         "pause and resume dialogs",
         "paused upload cannot publish; explicit selected-version resume",
@@ -270,6 +293,7 @@ try {
         "native homepage folder drop with 108 files, nested assets, and public content",
         "homepage rejects empty folders and unsupported loose files",
         "ordinary create flow does not replay a consumed homepage draft",
+        "pending directory read cannot override lazy SystemPage navigation",
         "all routes",
         "dark/light theme",
         "390px mobile layout",

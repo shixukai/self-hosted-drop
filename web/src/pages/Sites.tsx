@@ -138,6 +138,7 @@ export default function Sites({
     setDropNotice("读取已取消，可以重新拖入文件或目录。");
   }
   async function chooseDrop(data: DataTransfer) {
+    const sourceHistoryKey = window.history.state?.key;
     readController.current?.abort();
     const controller = new AbortController();
     readController.current = controller;
@@ -152,7 +153,14 @@ export default function Sites({
       const files = await readDroppedFiles(data, controller.signal, (count) => {
         if (readController.current === controller) setReadCount(count);
       });
-      if (readController.current !== controller || controller.signal.aborted)
+      // Lazy navigation can keep this page mounted while the next route loads.
+      // Browser history changes immediately, so an old read cannot override it.
+      if (
+        readController.current !== controller ||
+        controller.signal.aborted ||
+        window.history.state?.key !== sourceHistoryKey ||
+        window.location.pathname !== "/"
+      )
         return;
       draftId = saveUploadDraft(files);
       readController.current = null;
