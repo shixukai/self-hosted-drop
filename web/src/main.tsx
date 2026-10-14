@@ -34,7 +34,6 @@ import {
   ArrowUpRight,
   Check,
   CheckCheck,
-  ChevronDown,
   Clock3,
   Copy,
   Download,
@@ -244,12 +243,6 @@ function Workspace() {
           <Link to="/" aria-label="Drop 站点首页">
             <Brand />
           </Link>
-          <div className="workspace">
-            <span className="workspace-divider" />
-            <span className="workspace-avatar">D</span>
-            <span>我的工作区</span>
-            <ChevronDown size={13} />
-          </div>
           <nav className="main-nav" aria-label="主导航">
             {navs.map(([path, label]) => (
               <Button
