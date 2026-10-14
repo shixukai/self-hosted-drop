@@ -92,6 +92,7 @@ import {
   validSlug,
   type UploadFile,
 } from "../upload-files";
+import { takeUploadDraft } from "../upload-draft";
 
 import {
   Status,
@@ -107,6 +108,12 @@ import {
 export default function UploadPage() {
   const nav = useNavigate(),
     qc = useQueryClient();
+  const location = useLocation();
+  const draftId =
+    typeof location.state?.uploadDraftId === "string"
+      ? location.state.uploadDraftId
+      : "";
+  const appliedDraft = useRef("");
   const [params, setParams] = useSearchParams();
   const siteId = params.get("site") || "";
   const deploymentId = params.get("deployment") || "";
@@ -205,6 +212,19 @@ export default function UploadPage() {
       setSlug((current) => current || suggestion.slug);
     }
   }
+  useEffect(() => {
+    if (!draftId || appliedDraft.current === draftId) return;
+    // Consume in an effect, not a state initializer: StrictMode may run the
+    // render twice. The ref also protects its repeated effect setup.
+    appliedDraft.current = draftId;
+    const next = takeUploadDraft(draftId);
+    nav(location.pathname + location.search, { replace: true, state: null });
+    if (!next || siteId || deploymentId) return;
+    void action.run(async () => {
+      validateFiles(next);
+      choose(next);
+    });
+  }, [draftId, siteId, deploymentId]);
   function chooseInput(input: HTMLInputElement) {
     const next = fromFileList(Array.from(input.files || []));
     input.value = "";

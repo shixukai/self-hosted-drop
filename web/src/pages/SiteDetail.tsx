@@ -330,16 +330,29 @@ export default function SiteDetail({
                 "上传一个版本，开始发布。"}
             </p>
             {s.status === "ACTIVE" && (
-              <a
-                className="button button--secondary"
-                href={s.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <Globe2 size={17} />
-                访问公开站点
-                <ArrowUpRight size={16} />
-              </a>
+              <div className="release-public-actions">
+                <a
+                  className="button button--secondary"
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Globe2 size={17} />
+                  访问公开站点
+                  <ArrowUpRight size={16} />
+                </a>
+                <span title="复制公开链接">
+                  <Button
+                    isIconOnly
+                    variant="secondary"
+                    className="release-copy-link"
+                    aria-label="复制公开链接"
+                    onPress={() => onCopy(s.url)}
+                  >
+                    <Copy size={18} aria-hidden="true" />
+                  </Button>
+                </span>
+              </div>
             )}
           </Card.Content>
         </Card>
