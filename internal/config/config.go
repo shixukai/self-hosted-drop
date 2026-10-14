@@ -85,18 +85,24 @@ func Load() (Config, error) {
 	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return c, errors.New("invalid DROP_ADMIN_ORIGIN")
 	}
+	contentHostname := c.ContentDomain
 	if c.Development {
 		if !localHost(u.Hostname()) || !localHost(c.ContentDomain) {
 			return c, errors.New("development origins must use loopback or .localhost")
 		}
 		c.PublicScheme = "http"
-	} else if u.Scheme != "https" {
-		return c, errors.New("production admin origin must use https")
+	} else {
+		if u.Scheme != "https" {
+			return c, errors.New("production admin origin must use https")
+		}
+		c.ContentDomain, contentHostname, err = parseProductionContentDomain(c.ContentDomain)
+		if err != nil {
+			return c, err
+		}
 	}
-	if !c.Development && (strings.Contains(c.ContentDomain, ":") || net.ParseIP(c.ContentDomain) != nil) {
-		return c, errors.New("content domain must be a DNS suffix")
-	}
-	if strings.EqualFold(u.Hostname(), c.ContentDomain) || strings.HasSuffix(u.Hostname(), "."+c.ContentDomain) {
+	adminHostname := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	contentHostname = strings.ToLower(contentHostname)
+	if adminHostname == contentHostname || strings.HasSuffix(adminHostname, "."+contentHostname) {
 		return c, errors.New("admin and content origins must be separate")
 	}
 	if c.DatabaseURL == "" && (os.Getenv("DROP_POSTGRES_PASSWORD_FILE") != "" || os.Getenv("DROP_POSTGRES_PASSWORD") != "") {
@@ -117,6 +123,77 @@ func Load() (Config, error) {
 	}
 	return c, nil
 }
+
+// A content domain is a DNS suffix used to construct every published host. The
+// optional port describes the external HTTPS listener, not a part of the suffix.
+func parseProductionContentDomain(value string) (authority, hostname string, err error) {
+	invalid := errors.New("DROP_CONTENT_DOMAIN must be a DNS hostname with an optional port from 1 to 65535")
+	u, e := url.Parse("//" + value)
+	if e != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.ContainsAny(value, "/?#@") {
+		return "", "", invalid
+	}
+	hostname = strings.ToLower(u.Hostname())
+	if hostname == "" || len(hostname) > 253 || net.ParseIP(hostname) != nil {
+		return "", "", invalid
+	}
+	labels := strings.Split(hostname, ".")
+	for _, label := range labels {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return "", "", invalid
+		}
+		for _, ch := range label {
+			if !(ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-') {
+				return "", "", invalid
+			}
+		}
+	}
+	// Browsers also interpret shortened, integer, and hexadecimal IPv4 forms as
+	// addresses. A numeric final label must not enter the published DNS suffix.
+	last := labels[len(labels)-1]
+	numeric := true
+	for _, ch := range last {
+		if ch < '0' || ch > '9' {
+			numeric = false
+		}
+	}
+	if numeric {
+		return "", "", invalid
+	}
+	if strings.HasPrefix(last, "0x") && len(last) > 2 {
+		numeric = true
+		for _, ch := range last[2:] {
+			if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') {
+				numeric = false
+			}
+		}
+		if numeric {
+			return "", "", invalid
+		}
+	}
+	authority = hostname
+	if strings.Contains(value, ":") {
+		port := u.Port()
+		if port == "" || strings.Count(value, ":") != 1 {
+			return "", "", invalid
+		}
+		for _, ch := range port {
+			if ch < '0' || ch > '9' {
+				return "", "", invalid
+			}
+		}
+		n, e := strconv.ParseUint(port, 10, 16)
+		if e != nil || n == 0 {
+			return "", "", invalid
+		}
+		// The browser omits the default HTTPS port from Origin; preview exchange
+		// compares that origin with SiteURL, so use the same canonical form.
+		if n != 443 {
+			authority += ":" + strconv.FormatUint(n, 10)
+		}
+	}
+	return authority, hostname, nil
+}
+
 func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
 	trusted := []netip.Prefix{}
 	if strings.TrimSpace(value) == "" {
