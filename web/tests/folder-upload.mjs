@@ -2,6 +2,32 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import assert from "node:assert/strict";
 
+export async function waitForCleanupPublication(page, publication, label) {
+  assert(publication.id, label + " returned no publication ID");
+  const id = publication.id;
+  const deadline = Date.now() + 60000;
+  while (publication.status !== "APPLIED") {
+    if (["FAILED", "CONFLICT", "CANCELED"].includes(publication.status))
+      throw new Error(
+        `${label} ${id}: ${publication.status} ${publication.errorCode || ""} ${publication.errorMessage || ""}`,
+      );
+    if (Date.now() >= deadline)
+      throw new Error(`${label} ${id} timed out: ${publication.status}`);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    publication = await page.evaluate(
+      async ({ id, label }) => {
+        const response = await fetch(
+          "/api/v1/publications/" + encodeURIComponent(id),
+        );
+        if (!response.ok)
+          throw new Error(`${label} ${id} status check failed: ${response.status}`);
+        return response.json();
+      },
+      { id, label },
+    );
+  }
+}
+
 export async function verifyFolderUpload(
   page,
   browser,
@@ -169,7 +195,7 @@ export async function verifyFolderUpload(
     await cdp.detach();
     if (siteID) {
       // Only this test's generated site is moved into the recoverable trash.
-      await page.evaluate(async (id) => {
+      const publication = await page.evaluate(async (id) => {
         const session = await (await fetch("/api/v1/auth/session")).json();
         const site = await (await fetch("/api/v1/sites/" + id)).json();
         const response = await fetch("/api/v1/sites/" + id, {
@@ -185,7 +211,9 @@ export async function verifyFolderUpload(
         });
         if (!response.ok)
           throw new Error("Folder test cleanup failed: " + response.status);
+        return response.json();
       }, siteID);
+      await waitForCleanupPublication(page, publication, "Folder test cleanup");
     }
   }
 }

@@ -3,7 +3,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
-import { verifyFolderUpload } from "./folder-upload.mjs";
+import {
+  verifyFolderUpload,
+  waitForCleanupPublication,
+} from "./folder-upload.mjs";
 const base = process.env.DROP_TEST_BASE || "http://localhost:18180";
 assert(
   ["localhost", "127.0.0.1"].includes(new URL(base).hostname),
@@ -233,21 +236,22 @@ try {
   const publication = await page.evaluate(async (siteID) => {
     const s = await (await fetch("/api/v1/auth/session")).json();
     const site = await (await fetch("/api/v1/sites/" + siteID)).json();
-    return (
-      await fetch("/api/v1/sites/" + siteID, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": s.csrfToken,
-        },
-        body: JSON.stringify({
-          expectedGeneration: site.generation,
-          confirmSlug: site.slug,
-        }),
-      })
-    ).json();
+    const response = await fetch("/api/v1/sites/" + siteID, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": s.csrfToken,
+      },
+      body: JSON.stringify({
+        expectedGeneration: site.generation,
+        confirmSlug: site.slug,
+      }),
+    });
+    if (!response.ok)
+      throw new Error("Browser test cleanup failed: " + response.status);
+    return response.json();
   }, siteID);
-  assert(publication.id);
+  await waitForCleanupPublication(page, publication, "Browser test cleanup");
   console.log(
     JSON.stringify({
       passed: [
