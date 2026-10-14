@@ -26,7 +26,9 @@ func (a *App) diskCheck(reserve int64) error {
 	}
 	free := int64(s.Bavail) * int64(s.Bsize)
 	total := int64(s.Blocks) * int64(s.Bsize)
-	if free < max(a.Config.DiskReserve, total/10)+reserve || s.Ffree < 20000 {
+	// Filesystems with dynamic inode allocation (for example btrfs) report
+	// Files=Ffree=0; that means no fixed inode budget, not an exhausted budget.
+	if free < max(a.Config.DiskReserve, total/10)+reserve || (s.Files > 0 && s.Ffree < 20000) {
 		return apiError(507, "STORAGE_LOW", "磁盘可用空间或 inode 不足")
 	}
 	return nil

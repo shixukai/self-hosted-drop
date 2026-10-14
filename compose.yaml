@@ -108,6 +108,9 @@ services:
     tmpfs: ["/tmp:size=16m,mode=1777"]
     environment: {XDG_DATA_HOME: /tmp/caddy}
     cap_drop: [ALL]
+    # The official Caddy binary carries this file capability; retain it in the
+    # bounding set so exec succeeds even though this service binds high ports.
+    cap_add: [NET_BIND_SERVICE]
     security_opt: [no-new-privileges:true]
     mem_limit: 256m
     cpus: 1.0
