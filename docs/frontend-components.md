@@ -27,7 +27,7 @@ HeroUI 3.2.6 包的 `package.json` 标注 MIT，而随包 `LICENSE` 为 Apache-2
 
 | 区域 | 设计规格 | 对应源码 |
 |---|---|---|
-| 全局导航 | 顶部工作区、站点/部署/API/系统入口、主题开关；手机上分两行 | App 顶部导航、`.app-header` |
+| 全局导航 | 顶部品牌、站点/部署/API/系统入口、主题开关；手机上分两行 | App 顶部导航、`.app-header` |
 | 站点工作区 | 三列封面卡片，名称、域名、发布状态、版本与时间分层；可切换列表 | `renderProject`、HeroUI Card |
 | 搜索筛选 | HeroUI Tabs 与关联内容面板；关键词搜索、空结果、清除筛选；⌘/Ctrl+K | `filters`、TextField、Tabs.Panel |
 | 上传入口 | 文件叠层插画、拖放反馈、原生文件/目录选择 | `FileStack`、`.dropzone` |

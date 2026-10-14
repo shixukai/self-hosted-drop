@@ -200,6 +200,16 @@ func (a *App) Doctor(ctx context.Context) error {
 	if e := a.DB.Ping(ctx); e != nil {
 		return e
 	}
+	drift, pending, e := a.siteDrift(ctx)
+	if e != nil {
+		return e
+	}
+	if len(drift) > 0 || len(pending) > 0 {
+		if e = json.NewEncoder(os.Stdout).Encode(map[string]any{"database": "ok", "gateway": "unconfirmed", "drift": drift, "pendingPublications": pending}); e != nil {
+			return e
+		}
+		return fmt.Errorf("publication state is not settled: %d pending operations, %d desired/applied differences", len(pending), len(drift))
+	}
 	cfg, _, e := gateway.Read(ctx, a.Client, a.Config.CaddyAdmin)
 	if e != nil {
 		return e

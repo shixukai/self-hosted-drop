@@ -19,7 +19,9 @@ parser.add_argument('--root',default='');parser.add_argument('--entry',default='
 parser.add_argument('--mode',choices=['static','spa'],default='static')
 parser.add_argument('--message',default='');parser.add_argument('--publish',action='store_true')
 parser.add_argument('--allow-warnings',action='store_true');parser.add_argument('--idempotency-key')
+parser.add_argument('--retry-failed',action='store_true',help='Retry one confirmed FAILED/CANCELED deployment with a fresh generated key')
 args=parser.parse_args()
+if args.retry_failed and args.idempotency_key is not None:parser.error('--retry-failed cannot be combined with --idempotency-key; choose a fresh explicit key yourself')
 token=os.environ.get('DROP_TOKEN','');base=urllib.parse.urlparse(args.base.rstrip('/'))
 if not token:parser.error('Set DROP_TOKEN in the environment')
 if base.scheme!='https' and not(base.scheme=='http' and base.hostname in ('localhost','127.0.0.1')):parser.error('HTTPS is required outside localhost')
@@ -36,12 +38,7 @@ def api(method,path,data=None,key=None):
  if data is not None:h['Content-Type']='application/json';data=json.dumps(data)
  if key:h['Idempotency-Key']=key
  c.request(method,'/api/v1'+path,data,h);return decode(c,c.getresponse())
-try:
- sites=api('GET','/sites?q='+urllib.parse.quote(args.site)+'&limit=100')['items'];site=next((s for s in sites if s['slug']==args.site),None)
- if site is None:raise RuntimeError('SITE_NOT_FOUND: create the site in the admin UI first')
- meta={'rootDirectory':args.root,'entryPath':args.entry,'routingMode':args.mode,'interactionMode':'strict','message':args.message,'publishAfterReady':False}
- with args.file.open('rb') as file:hash=hashlib.file_digest(file,'sha256').hexdigest()
- key=args.idempotency_key or hashlib.sha256((site['id']+hash+args.file.name+json.dumps(meta,sort_keys=True)).encode()).hexdigest()
+def send_upload(site,meta,key):
  boundary='drop'+secrets.token_hex(16)
  filename=args.file.name
  if any(c in filename for c in '\r\n"'):raise RuntimeError('INVALID_FILENAME')
@@ -49,12 +46,26 @@ try:
  c=connection();c.putrequest('POST','/api/v1/sites/'+site['id']+'/deployments');c.putheader('Authorization','Bearer '+token);c.putheader('Content-Type','multipart/form-data; boundary='+boundary);c.putheader('Content-Length',str(len(prefix)+args.file.stat().st_size+len(suffix)));c.putheader('Idempotency-Key',key);c.endheaders();c.send(prefix)
  with args.file.open('rb') as file:
   while chunk:=file.read(1<<20):c.send(chunk)
- c.send(suffix);d=decode(c,c.getresponse())
- for _ in range(300):
-  d=api('GET','/deployments/'+d['id'])
-  if d['status'] in ('READY','FAILED','CANCELED','AWAITING_INPUT'):break
-  time.sleep(1)
- if d['status']!='READY':raise RuntimeError(d.get('errorCode') or 'PROCESSING_NOT_READY')
+ c.send(suffix);return decode(c,c.getresponse())
+d,p,key=None,None,None
+try:
+ sites=api('GET','/sites?q='+urllib.parse.quote(args.site)+'&limit=100')['items'];site=next((s for s in sites if s['slug']==args.site),None)
+ if site is None:raise RuntimeError('SITE_NOT_FOUND: create the site in the admin UI first')
+ meta={'rootDirectory':args.root,'entryPath':args.entry,'routingMode':args.mode,'interactionMode':'strict','message':args.message,'publishAfterReady':False}
+ with args.file.open('rb') as file:hash=hashlib.file_digest(file,'sha256').hexdigest()
+ key=args.idempotency_key or hashlib.sha256((site['id']+hash+args.file.name+json.dumps(meta,sort_keys=True)).encode()).hexdigest()
+ for attempt in range(2 if args.retry_failed else 1):
+  d=send_upload(site,meta,key)
+  for _ in range(300):
+   d=api('GET','/deployments/'+d['id'])
+   if d['status'] in ('READY','FAILED','CANCELED','AWAITING_INPUT'):break
+   time.sleep(1)
+  if d['status']=='READY':break
+  if args.retry_failed and attempt==0 and d['status'] in ('FAILED','CANCELED'):
+   key=key+'-retry-'+secrets.token_hex(8)
+   d=None
+   continue
+  raise RuntimeError(d.get('errorCode') or ('CANCELED' if d['status']=='CANCELED' else 'PROCESSING_NOT_READY'))
  if args.publish:
   if d['report']['warnings'] and not args.allow_warnings:
    print(json.dumps({'deploymentId':d['id'],'status':'READY','warnings':d['report']['warnings'],'requiresAcknowledgement':True},ensure_ascii=False));sys.exit(4)
@@ -67,4 +78,7 @@ try:
   print(json.dumps({'deploymentId':d['id'],'publicationId':p['id'],'status':'APPLIED','url':site['url']},ensure_ascii=False))
  else:print(json.dumps({'deploymentId':d['id'],'status':'READY','inspectionReportHash':d['report']['inspectionReportHash'],'warnings':d['report']['warnings']},ensure_ascii=False))
 except (OSError,RuntimeError,http.client.HTTPException) as e:
- message=str(e);print(json.dumps({'error':message},ensure_ascii=False),file=sys.stderr);sys.exit(5 if 'CONFLICT' in message or 'MISMATCH' in message else 3)
+ message=str(e)
+ result={'error':message,'deploymentId':d.get('id') if d else None,'publicationId':p.get('id') if p else None,'status':p.get('status') if p else d.get('status') if d else 'UNKNOWN'}
+ if key:result['idempotencyKey']=key
+ print(json.dumps(result,ensure_ascii=False),file=sys.stderr);sys.exit(5 if 'CONFLICT' in message or 'MISMATCH' in message else 3)

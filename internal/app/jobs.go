@@ -98,7 +98,18 @@ func (a *App) runJob(ctx context.Context) error {
 	defer done()
 	if e != nil {
 		a.Log.Error("job failed", "kind", kind, "resourceId", resource, "error", e.Error())
-		if kind == "PUBLISH" || attempts < 2 {
+		retryAutoPublish := false
+		if kind == "PROCESS" {
+			// Transient failures after READY belong to automatic publication,
+			// not artifact processing. Keep the same durable attempt result.
+			var d Deployment
+			d, stateErr := scanDeployment(a.DB.QueryRow(finishCtx, "SELECT "+deploymentFields+" FROM deployments WHERE id=$1", resource))
+			if stateErr != nil {
+				return stateErr
+			}
+			retryAutoPublish = d.Status == "READY" && d.Metadata.PublishAfterReady && d.AutoPublicationID == nil && d.AutoPublishErrorCode == ""
+		}
+		if kind == "PUBLISH" || attempts < 2 || retryAutoPublish {
 			_, err := a.DB.Exec(finishCtx, "UPDATE jobs SET status='PENDING',next_run_at=now()+interval '5 seconds' WHERE id=$1 AND attempt_id=$2 AND status='RUNNING'", jid, attempt)
 			return err
 		}
@@ -116,7 +127,7 @@ func (a *App) process(ctx context.Context, did, attempt, jid string) error {
 	if e != nil {
 		return e
 	}
-	if d.Status == "READY" && d.Metadata.PublishAfterReady && (len(d.Report.Warnings) == 0 || d.Metadata.WarningsPolicy == "allow") {
+	if d.Status == "READY" && d.Metadata.PublishAfterReady {
 		return a.autoPublish(ctx, d, d.Report)
 	}
 	if d.Status == "CANCELED" || d.Status == "FAILED" || d.Status == "READY" {
@@ -258,7 +269,7 @@ func (a *App) process(ctx context.Context, did, attempt, jid string) error {
 	}
 	os.Remove(filepath.Join(a.Config.DataDir, "uploads", did, "payload"))
 	a.auditEvent(ctx, d.CreatedBy, "DEPLOYMENT_READY", d.SiteID, did, "OK")
-	if d.Metadata.PublishAfterReady && (len(report.Warnings) == 0 || d.Metadata.WarningsPolicy == "allow") {
+	if d.Metadata.PublishAfterReady {
 		return a.autoPublish(ctx, d, report)
 	}
 	return nil
@@ -279,11 +290,12 @@ func (a *App) maintenance(ctx context.Context) {
 		}
 		rows.Close()
 		for _, v := range ids {
-			if os.RemoveAll(filepath.Join(a.Config.DataDir, "uploads", v)) == nil {
-				a.DB.Exec(ctx, "DELETE FROM quota_reservations WHERE deployment_id=$1", v)
+			if err := a.cleanupTerminalUpload(ctx, v); err != nil {
+				a.Log.Warn("terminal upload cleanup postponed", "deploymentId", v, "error", err.Error())
 			}
 		}
 	}
+	a.maintainTerminalUploads(ctx)
 	if e = a.collect(ctx, false, ""); e != nil {
 		a.Log.Warn("retention postponed", "reason", e.Error())
 	}

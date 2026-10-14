@@ -180,32 +180,6 @@ a {
   height: 17px;
   align-self: flex-start;
 }
-.workspace {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-.workspace-divider {
-  width: 1px;
-  height: 22px;
-  background: var(--border);
-  transform: rotate(20deg);
-  margin-right: 14px;
-}
-.workspace-avatar {
-  height: 25px;
-  width: 25px;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  color: #536aa1;
-  background: #e9eefb;
-  border-radius: 8px;
-  font-weight: 750;
-}
 .main-nav {
   display: flex;
   gap: 7px;
@@ -1670,9 +1644,6 @@ a {
   .header-inner {
     padding: 0 30px;
     gap: 20px;
-  }
-  .workspace {
-    display: none;
   }
   .main-nav {
     margin-left: 30px;

@@ -8,6 +8,17 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      test-db:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: drop_tests
+          POSTGRES_USER: drop
+          POSTGRES_PASSWORD: test-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U drop -d drop_tests"
+          --health-interval 5s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -19,6 +30,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Go unit tests and vet
+        env:
+          DROP_TEST_DATABASE_URL: postgres://drop:test-only-password@127.0.0.1:5432/drop_tests?sslmode=disable
         run: |
           go test -race ./...
           go vet ./...
@@ -31,6 +44,7 @@ jobs:
           python3 scripts/generate-openapi.py
           git diff --exit-code api/openapi.json
           python3 -m py_compile scripts/*.py tests/*.py
+          python3 -m unittest discover -s tests -p 'test_*.py'
       - name: Prepare isolated stack
         run: |
           python3 scripts/init-secrets.py

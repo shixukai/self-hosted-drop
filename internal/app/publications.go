@@ -127,6 +127,9 @@ func (a *App) acceptPublication(r *http.Request, sid string, req publishRequest)
 	if active {
 		return p, apiError(409, "DEPLOYMENT_CONFLICT", "已有发布切换正在处理")
 	}
+	if e = validatePublicationState(s, req.Action); e != nil {
+		return p, e
+	}
 	target := "ACTIVE"
 	did := s.DeploymentID
 	switch req.Action {
@@ -164,8 +167,20 @@ func (a *App) acceptPublication(r *http.Request, sid string, req publishRequest)
 		}
 		target = "PAUSED"
 	case "RESUME":
-		if s.Status != "PAUSED" || did == nil {
+		if s.Status != "PAUSED" {
 			return p, apiError(409, "SITE_NOT_PUBLISHED", "没有可恢复的正式版本")
+		}
+		if req.DeploymentID != "" {
+			d, e := scanDeployment(tx.QueryRow(ctx, "SELECT "+deploymentFields+" FROM deployments WHERE id=$1 AND site_id=$2 FOR UPDATE", req.DeploymentID, sid))
+			if e != nil {
+				return p, e
+			}
+			if e = validatePublicationDeployment(d, req.ReportHash, req.AcknowledgeWarnings); e != nil {
+				return p, e
+			}
+			did = &d.ID
+		} else if did == nil {
+			return p, apiError(409, "SITE_NOT_PUBLISHED", "没有可恢复的正式版本，请选择已就绪版本恢复服务")
 		}
 	default:
 		return p, apiError(422, "INVALID_INPUT", "操作无效")
@@ -176,7 +191,7 @@ func (a *App) acceptPublication(r *http.Request, sid string, req publishRequest)
 			return p, e
 		}
 		if !available {
-			return p, apiError(409, "ARTIFACT_UNAVAILABLE", "最近正式版本已回收，请上传新版本")
+			return p, apiError(409, "ARTIFACT_UNAVAILABLE", "最近正式版本已回收，请上传并选择新版本恢复服务")
 		}
 	}
 	if _, e = tx.Exec(ctx, "UPDATE sites SET generation=generation+1,desired_status=$2,desired_deployment_id=$3,updated_at=now() WHERE id=$1", sid, target, did); e != nil {
@@ -208,26 +223,6 @@ func (a *App) getPublication(w http.ResponseWriter, r *http.Request) error {
 		return e
 	}
 	writeJSON(w, 200, p)
-	return nil
-}
-func (a *App) autoPublish(ctx context.Context, d Deployment, report archive.Result) error {
-	u := Actor{ID: d.CreatedBy, Admin: !strings.HasPrefix(d.CreatedBy, "token:")}
-	if !u.Admin {
-		u.TokenID = strings.TrimPrefix(d.CreatedBy, "token:")
-		if e := a.DB.QueryRow(ctx, "SELECT scopes FROM api_tokens WHERE id=$1 AND revoked_at IS NULL AND expires_at>now()", u.TokenID).Scan(&u.Scopes); e != nil {
-			a.auditEvent(ctx, u.ID, "AUTO_PUBLISH", d.SiteID, d.ID, "TOKEN_REVOKED")
-			return nil
-		}
-	}
-	r, _ := http.NewRequestWithContext(context.WithValue(ctx, actorKey{}, u), "POST", "http://internal", nil)
-	r.Header.Set("Idempotency-Key", "auto-"+d.ID)
-	if e := a.require(r, "publications:write", d.SiteID); e != nil {
-		return nil
-	}
-	_, e := a.acceptPublication(r, d.SiteID, publishRequest{DeploymentID: d.ID, ExpectedGeneration: d.Metadata.ExpectedGeneration, Action: "PUBLISH", ReportHash: report.ReportHash, AcknowledgeWarnings: d.Metadata.WarningsPolicy == "allow"})
-	if e != nil {
-		a.auditEvent(ctx, u.ID, "AUTO_PUBLISH", d.SiteID, d.ID, "NOT_APPLIED")
-	}
 	return nil
 }
 func (a *App) gatewayOptions(ctx context.Context, target *Publication) (gateway.Options, error) {
@@ -323,15 +318,20 @@ func (a *App) applyPublication(ctx context.Context, pid string) error {
 	if p.Status == "APPLIED" || p.Status == "FAILED" || p.Status == "CONFLICT" || p.Status == "CANCELED" {
 		return nil
 	}
+	uncertainAttempt := p.Status == "APPLYING" || p.Status == "RECOVERING"
 	var blocked, revert bool
+	var operatorMode string
 	if e = conn.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM publications WHERE id<>$1 AND status IN('APPLYING','RECOVERING'))", pid).Scan(&blocked); e != nil {
 		return e
 	}
 	if blocked {
 		return fmt.Errorf("another publication requires recovery")
 	}
-	if e = conn.QueryRow(ctx, "SELECT revert_required FROM publications WHERE id=$1", pid).Scan(&revert); e != nil {
+	if e = conn.QueryRow(ctx, "SELECT revert_required,operator_reconcile_mode FROM publications WHERE id=$1", pid).Scan(&revert, &operatorMode); e != nil {
 		return e
+	}
+	if operatorMode != "" {
+		return apiError(409, "OPERATOR_RECONCILIATION_REQUIRED", "维护对账尚未确认，需要继续原恢复操作")
 	}
 	if revert {
 		return a.compensate(ctx, p)
@@ -402,6 +402,24 @@ func (a *App) applyPublication(ctx context.Context, pid string) error {
 		}
 		return a.compensate(ctx, p)
 	}
+	var expectedRecoveryHash string
+	if uncertainAttempt {
+		opts, err := a.gatewayOptions(ctx, &p)
+		if err != nil {
+			return a.recovering(ctx, pid, err)
+		}
+		expectedRecoveryHash = configHash(gateway.Build(opts))
+		observed, _, err := gateway.Read(ctx, a.Client, a.Config.CaddyAdmin)
+		if err != nil || configHash(observed) != expectedRecoveryHash {
+			return a.recovering(ctx, pid, fmt.Errorf("uncertain publication full configuration differs"))
+		}
+		if err = a.verifySiteArtifacts(ctx, &p); err != nil {
+			return a.recovering(ctx, pid, err)
+		}
+		if _, err = a.verifySiteContent(ctx, &p); err != nil {
+			return a.recovering(ctx, pid, err)
+		}
+	}
 	tx, e := conn.Begin(ctx)
 	if e != nil {
 		return e
@@ -416,6 +434,10 @@ func (a *App) applyPublication(ctx context.Context, pid string) error {
 	actual, _, e := gateway.Read(ctx, a.Client, a.Config.CaddyAdmin)
 	if e != nil {
 		return e
+	}
+	if uncertainAttempt && configHash(actual) != expectedRecoveryHash {
+		tx.Rollback(ctx)
+		return a.recovering(ctx, pid, fmt.Errorf("gateway changed during automatic reconciliation"))
 	}
 	if _, e = tx.Exec(ctx, "INSERT INTO gateway_snapshots(config,config_hash) VALUES($1,$2)", jsonBytes(actual), digest(string(jsonBytes(actual)))); e != nil {
 		return e
@@ -455,6 +477,12 @@ func (a *App) compensate(ctx context.Context, p Publication) error {
 	}
 	previousState := Publication{SiteID: s.ID, TargetStatus: s.Status, DeploymentID: s.DeploymentID}
 	if e = a.probePublication(ctx, previousState); e != nil {
+		return a.recovering(ctx, p.ID, e)
+	}
+	if e = a.verifySiteArtifacts(ctx, nil); e != nil {
+		return a.recovering(ctx, p.ID, e)
+	}
+	if _, e = a.verifySiteContent(ctx, nil); e != nil {
 		return a.recovering(ctx, p.ID, e)
 	}
 	return a.failPublication(ctx, p.ID, "CONTENT_VERIFICATION_FAILED", "切换后内容校验失败，已验证并恢复原路由")

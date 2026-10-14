@@ -629,3 +629,34 @@ select {
   gap: 8px;
   margin-bottom: 28px;
 }
+.release-public-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.release-public-actions .release-copy-link {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+}
+.drop-launch {
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+.drop-launch.dragging {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.drop-launch .home-drop-status {
+  margin-top: 10px;
+  color: var(--accent);
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  .drop-launch {
+    transition: none;
+  }
+}

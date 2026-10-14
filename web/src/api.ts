@@ -1,10 +1,11 @@
+export type SiteStatus = "DRAFT" | "ACTIVE" | "PAUSED" | "DELETED";
 export type Site = {
   id: string;
   slug: string;
   name: string;
   description: string;
-  status: "DRAFT" | "ACTIVE" | "PAUSED" | "DELETED";
-  desiredStatus: string;
+  status: SiteStatus;
+  desiredStatus: SiteStatus;
   generation: number;
   appliedGeneration: number;
   appliedDeploymentId: string | null;
@@ -50,6 +51,9 @@ export type Deployment = {
   fileCount: number;
   errorCode: string;
   errorMessage: string;
+  autoPublicationId: string | null;
+  autoPublishErrorCode: string;
+  autoPublishErrorMessage: string;
   pinned: boolean;
   createdAt: string;
 };
@@ -89,6 +93,13 @@ export type System = {
   adminOrigin: string;
 };
 export type Session = { administrator: boolean; csrfToken: string };
+export function publicationBlockedReason(site: Site): string {
+  if (site.status === "DELETED" || site.desiredStatus === "DELETED")
+    return "站点已移入回收站，请先恢复站点。";
+  if (site.status === "PAUSED" || site.desiredStatus === "PAUSED")
+    return "站点已暂停，请先在站点详情恢复服务，再发布或回滚。暂停期间仍可上传和检查新版本。";
+  return "";
+}
 let csrf = "";
 export function setCSRF(value: string) {
   csrf = value;

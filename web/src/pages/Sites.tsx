@@ -81,6 +81,8 @@ import {
   type System,
 } from "../api";
 import { FileStack, SiteArtwork } from "../artwork";
+import { readDroppedFiles } from "../upload-files";
+import { discardUploadDraft, saveUploadDraft } from "../upload-draft";
 import "@fontsource-variable/manrope";
 
 import {
@@ -110,6 +112,71 @@ export default function Sites({
   const [confirm, setConfirm] = useState<{ site: Site; op: string } | null>(
     null,
   );
+  const [dragging, setDragging] = useState(false),
+    [reading, setReading] = useState(false),
+    [readCount, setReadCount] = useState(0),
+    [dropError, setDropError] = useState<unknown>(null),
+    [dropNotice, setDropNotice] = useState("");
+  const dragDepth = useRef(0),
+    readController = useRef<AbortController | null>(null);
+  useEffect(() => {
+    dragDepth.current = 0;
+    setDragging(false);
+    setReading(false);
+    return () => {
+      readController.current?.abort();
+      readController.current = null;
+    };
+  }, [trash]);
+  function isFileDrag(data: DataTransfer) {
+    return Array.from(data.types).includes("Files");
+  }
+  function cancelRead() {
+    readController.current?.abort();
+    readController.current = null;
+    setReading(false);
+    setDropNotice("读取已取消，可以重新拖入文件或目录。");
+  }
+  async function chooseDrop(data: DataTransfer) {
+    const sourceHistoryKey = window.history.state?.key;
+    readController.current?.abort();
+    const controller = new AbortController();
+    readController.current = controller;
+    setDropError(null);
+    setDropNotice("");
+    setReadCount(0);
+    setReading(true);
+    let draftId: string | undefined;
+    try {
+      // readDroppedFiles captures entries before its first await, while the
+      // browser still allows access to this drop event's DataTransfer.
+      const files = await readDroppedFiles(data, controller.signal, (count) => {
+        if (readController.current === controller) setReadCount(count);
+      });
+      // Lazy navigation can keep this page mounted while the next route loads.
+      // Browser history changes immediately, so an old read cannot override it.
+      if (
+        readController.current !== controller ||
+        controller.signal.aborted ||
+        window.history.state?.key !== sourceHistoryKey ||
+        window.location.pathname !== "/"
+      )
+        return;
+      draftId = saveUploadDraft(files);
+      readController.current = null;
+      setReading(false);
+      nav("/upload", { state: { uploadDraftId: draftId } });
+    } catch (error) {
+      if (draftId) discardUploadDraft(draftId);
+      if (readController.current === controller && !controller.signal.aborted)
+        setDropError(error);
+    } finally {
+      if (readController.current === controller) {
+        readController.current = null;
+        setReading(false);
+      }
+    }
+  }
   const system = useSystem();
   useEffect(() => {
     const t = setTimeout(() => setSearch(query), 200);
@@ -137,7 +204,35 @@ export default function Sites({
   });
   const sites = listing.data?.pages.flatMap((x) => x.items) || [];
   return (
-    <section aria-labelledby="sites-title" className="view-enter">
+    <section
+      aria-labelledby="sites-title"
+      className="view-enter"
+      onDragEnter={(e) => {
+        if (trash || !isFileDrag(e.dataTransfer)) return;
+        e.preventDefault();
+        dragDepth.current++;
+        setDragging(true);
+      }}
+      onDragOver={(e) => {
+        if (trash || !isFileDrag(e.dataTransfer)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (trash || !isFileDrag(e.dataTransfer)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (!dragDepth.current) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (trash || !isFileDrag(e.dataTransfer)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragDepth.current = 0;
+        setDragging(false);
+        void chooseDrop(e.dataTransfer);
+      }}
+    >
       <div className="page-intro">
         <div>
           <div className="eyebrow">
@@ -321,7 +416,7 @@ export default function Sites({
                     ? "试试名称或网址中的关键词。"
                     : trash
                       ? "已删除的站点会暂时保留在这里。"
-                      : "上传一份 HTML 或 ZIP，就可以开始。"}
+                      : "拖入 HTML、ZIP 或网站目录，就可以开始。"}
                 </p>
                 <Button
                   variant="secondary"
@@ -354,22 +449,52 @@ export default function Sites({
       )}
       {!trash && (
         <>
-          <div className="drop-launch">
+          <div
+            className={"drop-launch " + (dragging ? "dragging" : "")}
+            aria-busy={reading}
+          >
             <FileStack />
             <div className="drop-launch-copy">
-              <h2>下一个好想法，拖进来就好。</h2>
-              <p>支持 HTML、ZIP 和网站目录。你的内容，你的服务器。</p>
+              <h2>
+                {dragging
+                  ? "松开，开始准备上传。"
+                  : reading
+                    ? "正在读取你的作品。"
+                    : "下一个好想法，拖进来就好。"}
+              </h2>
+              <p>
+                支持 HTML、ZIP 和已构建的网站目录，读取后继续确认上传。
+              </p>
+              {(reading || dropNotice) && (
+                <p className="home-drop-status" role="status">
+                  {reading
+                    ? `正在读取目录，已找到 ${readCount} 个文件…`
+                    : dropNotice}
+                </p>
+              )}
             </div>
-            <Button
-              variant="secondary"
-              className="launch-button"
-              onPress={() => nav("/upload")}
-            >
-              <Upload size={17} />
-              上传文件
-              <ArrowRight size={16} />
-            </Button>
+            {reading ? (
+              <Button
+                variant="secondary"
+                className="launch-button"
+                onPress={cancelRead}
+              >
+                <X size={17} />
+                取消读取
+              </Button>
+            ) : (
+              <Button
+                variant="secondary"
+                className="launch-button"
+                onPress={() => nav("/upload")}
+              >
+                <Upload size={17} />
+                上传文件
+                <ArrowRight size={16} />
+              </Button>
+            )}
           </div>
+          <ErrorNote error={dropError} />
           <div className="workspace-bottom">
             <section className="recent-section">
               <div className="section-heading">

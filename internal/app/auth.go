@@ -9,7 +9,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/argon2"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -74,7 +73,7 @@ func (a *App) rate(key string, max int) bool {
 	return v.Count <= max
 }
 func (a *App) loginRate(r *http.Request) error {
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	host := a.loginClientAddress(r)
 	if !a.rate("login-ip:"+host, 10) || !a.rate("login-global", 30) {
 		return apiError(429, "RATE_LIMITED", "尝试次数过多，请稍后重试")
 	}

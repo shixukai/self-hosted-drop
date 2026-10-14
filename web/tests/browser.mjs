@@ -3,7 +3,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
-import { verifyFolderUpload } from "./folder-upload.mjs";
+import {
+  verifyFolderUpload,
+  waitForCleanupPublication,
+} from "./folder-upload.mjs";
+import { verifyHomepageDrop } from "./homepage-drop.mjs";
 const base = process.env.DROP_TEST_BASE || "http://localhost:18180";
 assert(
   ["localhost", "127.0.0.1"].includes(new URL(base).hostname),
@@ -96,6 +100,28 @@ try {
   await publicPage.close();
   await click("查看站点");
   await page.waitForSelector(".release-row");
+  const publicSiteURL = await page.$eval(
+    ".release-public-actions a",
+    (el) => el.getAttribute("href"),
+  );
+  assert.equal(new URL(publicSiteURL).href, url);
+  await browser.defaultBrowserContext().overridePermissions(base, [
+    "clipboard-read",
+    "clipboard-write",
+    "clipboard-sanitized-write",
+  ]);
+  await page.$eval('button[aria-label="复制公开链接"]', (el) =>
+    el.scrollIntoView({ block: "center", behavior: "instant" }),
+  );
+  await page.click('button[aria-label="复制公开链接"]');
+  await page.waitForFunction(() =>
+    document.body.textContent.includes("链接已复制"),
+  );
+  assert.equal(
+    await page.evaluate(() => navigator.clipboard.readText()),
+    publicSiteURL,
+    "The copy action must write the complete public site URL",
+  );
   await click("受控预览");
   await page.waitForSelector("[role=dialog] a");
   const previewURL = await page.$eval("[role=dialog] a", (a) => a.href);
@@ -129,7 +155,76 @@ try {
       ),
     { timeout: 30000 },
   );
+  await click("暂停");
+  await click("确认");
+  await page.waitForSelector('[role="dialog"]', { hidden: true });
+  await page.waitForSelector("#publication-blocked");
+  await page.goto(base + "/upload?site=" + siteID, {
+    waitUntil: "networkidle0",
+  });
+  const replacement = path.join(temporary, "browser-resume.html");
+  await fs.writeFile(
+    replacement,
+    '<!doctype html><meta charset="utf-8"><h1>Explicit replacement resume verified</h1>',
+  );
+  await (
+    await page.$("input[type=file]:not([multiple])")
+  ).uploadFile(replacement);
+  await click("上传并检查");
+  await page.waitForFunction(
+    () => document.body.textContent.includes("检查完成，再确认一下。"),
+    { timeout: 60000 },
+  );
+  assert.match(
+    await page.$eval("#publication-blocked", (e) => e.textContent),
+    /站点已暂停/,
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        [...document.querySelectorAll("button")].find(
+          (b) => b.textContent.trim() === "确认公开发布",
+        )?.disabled,
+    ),
+    true,
+    "A READY replacement must not implicitly reopen a paused site",
+  );
+  await page.goto(base + "/sites/" + siteID, { waitUntil: "networkidle0" });
+  await page.waitForSelector(".release-row");
+  const resumeButton = await page.evaluateHandle(() => {
+    const row = [...document.querySelectorAll(".release-row")].find((row) =>
+      row.textContent.includes("browser-resume.html"),
+    );
+    return [...(row?.querySelectorAll("button") || [])].find(
+      (button) => button.textContent.trim() === "以此版本恢复服务",
+    );
+  });
+  assert(
+    resumeButton.asElement(),
+    "The replacement needs an explicit resume action",
+  );
+  await resumeButton.asElement().click();
+  await resumeButton.dispose();
+  await page.waitForSelector("[role=dialog]");
+  assert.match(
+    await page.$eval("[role=dialog]", (e) => e.textContent),
+    /以此版本恢复公开访问/,
+  );
+  await click("确认");
+  await page.waitForSelector('[role="dialog"]', { hidden: true });
+  await page.waitForFunction(
+    () => !document.querySelector("#publication-blocked"),
+    { timeout: 30000 },
+  );
+  const resumedPage = await browser.newPage();
+  await resumedPage.goto(url);
+  assert.equal(
+    await resumedPage.$eval("h1", (e) => e.textContent),
+    "Explicit replacement resume verified",
+  );
+  await resumedPage.close();
   await verifyFolderUpload(page, browser, temporary, base, click);
+  await verifyHomepageDrop(page, browser, temporary, base, click);
   for (const route of ["/", "/deployments", "/tokens", "/system", "/upload"]) {
     await page.goto(base + route, { waitUntil: "networkidle0" });
     assert.equal(
@@ -165,32 +260,40 @@ try {
   const publication = await page.evaluate(async (siteID) => {
     const s = await (await fetch("/api/v1/auth/session")).json();
     const site = await (await fetch("/api/v1/sites/" + siteID)).json();
-    return (
-      await fetch("/api/v1/sites/" + siteID, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": s.csrfToken,
-        },
-        body: JSON.stringify({
-          expectedGeneration: site.generation,
-          confirmSlug: site.slug,
-        }),
-      })
-    ).json();
+    const response = await fetch("/api/v1/sites/" + siteID, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": s.csrfToken,
+      },
+      body: JSON.stringify({
+        expectedGeneration: site.generation,
+        confirmSlug: site.slug,
+      }),
+    });
+    if (!response.ok)
+      throw new Error("Browser test cleanup failed: " + response.status);
+    return response.json();
   }, siteID);
-  assert(publication.id);
+  await waitForCleanupPublication(page, publication, "Browser test cleanup");
   console.log(
     JSON.stringify({
       passed: [
         "UI login",
         "HTML upload and publish",
         "public content",
+        "public URL copy writes the complete URL to the isolated clipboard",
         "preview fragment exchange",
         "pause and resume dialogs",
+        "paused upload cannot publish; explicit selected-version resume",
         "native folder drop with 108 files and nested assets",
         "directory picker with one nested file",
         "empty folder and required-field feedback",
+        "native homepage HTML and ZIP drop preserves files through upload",
+        "native homepage folder drop with 108 files, nested assets, and public content",
+        "homepage rejects empty folders and unsupported loose files",
+        "ordinary create flow does not replay a consumed homepage draft",
+        "pending directory read cannot override lazy SystemPage navigation",
         "all routes",
         "dark/light theme",
         "390px mobile layout",

@@ -16,7 +16,6 @@ import {
   ArrowUpRight,
   Check,
   CheckCheck,
-  ChevronDown,
   CircleHelp,
   Clock3,
   Code2,
@@ -433,12 +432,6 @@ function App() {
               drop<span className="brand-period">.</span>
             </span>
           </button>
-          <div className="workspace">
-            <span className="workspace-divider" />
-            <span className="workspace-avatar">D</span>
-            <span>豆芽的工作区</span>
-            <ChevronDown size={13} />
-          </div>
           <nav className="main-nav" aria-label="主导航">
             {nav.map((n) => (
               <Button
