@@ -55,13 +55,15 @@ try {
       {},
       text,
     );
-    await page.evaluate(
+    const target = await page.evaluateHandle(
       (text) =>
-        [...document.querySelectorAll("button")]
-          .find((b) => b.textContent.trim() === text)
-          .click(),
+        [...document.querySelectorAll("button")].find(
+          (button) => button.textContent.trim() === text && !button.disabled,
+        ),
       text,
     );
+    await target.asElement().click();
+    await target.dispose();
   }
   await click("新建站点");
   await page.waitForSelector('input[placeholder="my-report"]');
@@ -111,12 +113,14 @@ try {
   await click("暂停");
   await page.waitForSelector("[role=dialog]");
   await click("确认");
+  await page.waitForSelector('[role="dialog"]', { hidden: true });
   await page.waitForFunction(
     () => document.body.textContent.includes("恢复服务"),
     { timeout: 30000 },
   );
   await click("恢复服务");
   await click("确认");
+  await page.waitForSelector('[role="dialog"]', { hidden: true });
   await page.waitForFunction(
     () =>
       [...document.querySelectorAll("button")].some(

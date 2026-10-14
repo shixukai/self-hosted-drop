@@ -13,7 +13,7 @@ for name in ['db.key','setup.key','internal.key']:
 for name in ['uploads','quarantine','releases','runtime']:(root/'.data'/name).mkdir(parents=True,exist_ok=True)
 (local/'postgres.env').write_text('POSTGRES_DB=drop\nPOSTGRES_USER=drop\nPOSTGRES_PASSWORD='+(local/'db.key').read_text().strip()+'\n');(local/'postgres.env').chmod(0o600)
 def container(name,command):
-    exists=subprocess.run(['docker','inspect',name],capture_output=True,text=True)
+    exists=subprocess.run(['docker','container','inspect',name],capture_output=True,text=True)
     if exists.returncode==0:
         meta=json.loads(exists.stdout)[0]
         if meta['Config']['Labels'].get('project')!='self-hosted-drop':raise SystemExit('Container name is in use by another project')
