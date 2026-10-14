@@ -1,5 +1,6 @@
-import { Zip, AsyncZipDeflate } from "fflate";
-self.onmessage = async (event: MessageEvent<{ files: File[] }>) => {
+import { Zip, ZipDeflate } from "fflate";
+import type { UploadFile } from "./upload-files";
+self.onmessage = async (event: MessageEvent<{ files: UploadFile[] }>) => {
   const files = event.data.files;
   const chunks: Uint8Array[] = [];
   let bytes = 0;
@@ -22,9 +23,10 @@ self.onmessage = async (event: MessageEvent<{ files: File[] }>) => {
   });
   try {
     for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const path = file.webkitRelativePath || file.name;
-      const entry = new AsyncZipDeflate(path, { level: 3 });
+      const { file, path } = files[i];
+      // This code already runs off the main thread. Avoid spawning one more
+      // worker per file when a directory contains hundreds of small assets.
+      const entry = new ZipDeflate(path, { level: 3 });
       zip.add(entry);
       const reader = file.stream().getReader();
       for (;;) {

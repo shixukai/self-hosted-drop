@@ -82,6 +82,15 @@ import {
 } from "../api";
 import { FileStack, SiteArtwork } from "../artwork";
 import "@fontsource-variable/manrope";
+import {
+  fromFileList,
+  readDroppedFiles,
+  selectionLabel,
+  suggestedSite,
+  validateFiles,
+  validSlug,
+  type UploadFile,
+} from "../upload-files";
 
 import {
   Status,
@@ -110,8 +119,10 @@ export default function UploadPage() {
     [slug, setSlug] = useState(""),
     [mode, setMode] = useState("static"),
     [message, setMessage] = useState(""),
-    [files, setFiles] = useState<File[]>([]),
+    [files, setFiles] = useState<UploadFile[]>([]),
     [progress, setProgress] = useState(0),
+    [reading, setReading] = useState(false),
+    [readCount, setReadCount] = useState(0),
     [packing, setPacking] = useState(false),
     [dragging, setDragging] = useState(false),
     [ack, setAck] = useState(false),
@@ -153,14 +164,42 @@ export default function UploadPage() {
     },
     [],
   );
-  function choose(next: File[]) {
+  function choose(next: UploadFile[]) {
     action.clear();
     setFiles(next);
     setAck(false);
     setPublished(null);
+    if (next.length && !siteId) {
+      const suggestion = suggestedSite(next);
+      setName((current) => current || suggestion.name);
+      setSlug((current) => current || suggestion.slug);
+    }
+  }
+  function chooseInput(input: HTMLInputElement) {
+    const next = fromFileList(Array.from(input.files || []));
+    input.value = "";
+    if (!next.length || action.busy) return;
+    void action.run(async () => {
+      setFiles([]);
+      validateFiles(next);
+      choose(next);
+    });
+  }
+  async function chooseDrop(data: DataTransfer) {
+    if (action.busy || d) return;
+    const controller = new AbortController();
+    abort.current = controller;
+    setFiles([]);
+    setReading(true);
+    setReadCount(0);
+    await action.run(async () => {
+      choose(await readDroppedFiles(data, controller.signal, setReadCount));
+    });
+    setReading(false);
   }
   async function bundle(): Promise<File> {
-    if (files.length === 1 && !files[0].webkitRelativePath) return files[0];
+    if (files.length === 1 && !files[0].path.includes("/"))
+      return files[0].file;
     setPacking(true);
     return new Promise((resolve, reject) => {
       const w = new Worker(new URL("../zip.worker.ts", import.meta.url), {
@@ -197,12 +236,7 @@ export default function UploadPage() {
   }
   async function start() {
     await action.run(async () => {
-      if (!files.length) throw new Error("请先选择 HTML、ZIP 或网站目录");
-      if (
-        files.length > 10000 ||
-        files.some((f) => f.size > 100 * 1024 * 1024 && files.length > 1)
-      )
-        throw new Error("目录超过文件数量或单文件大小限制");
+      validateFiles(files);
       let sid = siteId;
       if (!sid) {
         const s = await mutate<Site>("/sites", { name, slug, description: "" });
@@ -252,6 +286,15 @@ export default function UploadPage() {
       qc.invalidateQueries({ queryKey: ["system"] });
     });
   }
+  const uploadRequirement = !files.length
+    ? "先添加 HTML、ZIP 或网站目录。"
+    : !name.trim()
+      ? "请填写显示名称，再继续上传。"
+      : !slug
+        ? "请填写站点标识，它会成为分享地址的一部分。"
+        : !validSlug(slug)
+          ? "站点标识须为 3–40 位小写字母、数字或连字符，首尾为字母或数字；请避开保留名称及 d- 前缀。"
+          : "";
   return (
     <section className="view-enter">
       <Button
@@ -351,13 +394,14 @@ export default function UploadPage() {
                     className={"dropzone " + (dragging ? "dragging" : "")}
                     onDragOver={(e) => {
                       e.preventDefault();
-                      setDragging(true);
+                      e.dataTransfer.dropEffect = action.busy ? "none" : "copy";
+                      setDragging(!action.busy);
                     }}
                     onDragLeave={() => setDragging(false)}
                     onDrop={(e) => {
                       e.preventDefault();
                       setDragging(false);
-                      choose(Array.from(e.dataTransfer.files));
+                      void chooseDrop(e.dataTransfer);
                     }}
                   >
                     <FileStack />
@@ -390,7 +434,7 @@ export default function UploadPage() {
                       accept=".html,.htm,.zip"
                       hidden
                       ref={fileInput}
-                      onChange={(e) => choose(Array.from(e.target.files || []))}
+                      onChange={(e) => chooseInput(e.target)}
                     />
                     <input
                       type="file"
@@ -400,7 +444,7 @@ export default function UploadPage() {
                       {...({
                         webkitdirectory: "",
                       } as React.InputHTMLAttributes<HTMLInputElement>)}
-                      onChange={(e) => choose(Array.from(e.target.files || []))}
+                      onChange={(e) => chooseInput(e.target)}
                     />
                   </div>
                 )}
@@ -410,12 +454,11 @@ export default function UploadPage() {
                       <FileCode2 size={23} />
                     </span>
                     <div>
-                      <strong>
-                        {files.length === 1
-                          ? files[0].name
-                          : `${files.length} 个文件`}
-                      </strong>
-                      <p>{size(files.reduce((n, f) => n + f.size, 0))}</p>
+                      <strong>{selectionLabel(files)}</strong>
+                      <p>
+                        {files.length} 个文件 ·{" "}
+                        {size(files.reduce((n, f) => n + f.file.size, 0))}
+                      </p>
                     </div>
                     <Button
                       isIconOnly
@@ -430,9 +473,14 @@ export default function UploadPage() {
                 )}
                 {action.busy && !d && (
                   <div className="upload-progress">
-                    <progress max={100} value={progress} />
-                    <span>
-                      {packing ? "正在打包目录" : "正在上传"} {progress}%
+                    <progress
+                      max={100}
+                      value={reading ? undefined : progress}
+                    />
+                    <span role="status">
+                      {reading
+                        ? `正在读取目录，已找到 ${readCount} 个文件…`
+                        : `${packing ? "正在打包目录" : "正在上传"} ${progress}%`}
                     </span>
                     <Button
                       variant="ghost"
@@ -584,8 +632,7 @@ export default function UploadPage() {
               <Label>站点标识</Label>
               <Input placeholder="my-report" maxLength={40} />
               <p className="field-help">
-                {slug || "my-report"}.
-                {system.data?.contentDomain || "drop.douyacn.com"}
+                用于分享网址，3–40 位小写字母、数字或连字符。
               </p>
             </TextField>
             <div className="mode-field">
@@ -630,16 +677,25 @@ export default function UploadPage() {
                 <ArrowUpRight size={18} />
               </Button>
             ) : !d ? (
-              <Button
-                fullWidth
-                size="lg"
-                isPending={action.busy}
-                isDisabled={!files.length || !name || !slug}
-                onPress={start}
-              >
-                上传并检查
-                <ArrowRight size={18} />
-              </Button>
+              <>
+                <Button
+                  fullWidth
+                  size="lg"
+                  isPending={action.busy}
+                  isDisabled={!!uploadRequirement || action.busy}
+                  aria-describedby="upload-requirement"
+                  onPress={start}
+                >
+                  上传并检查
+                  <ArrowRight size={18} />
+                </Button>
+                <p id="upload-requirement" className="field-help" role="status">
+                  {!action.busy &&
+                    (uploadRequirement ||
+                      (!siteId &&
+                        "已根据文件名填写作品信息，你可以修改后再上传。"))}
+                </p>
+              </>
             ) : (
               <p className="settings-note">
                 {busyStatuses.includes(d.status)

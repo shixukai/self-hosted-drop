@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
+import { verifyFolderUpload } from "./folder-upload.mjs";
 const base = process.env.DROP_TEST_BASE || "http://localhost:18180";
 assert(
   ["localhost", "127.0.0.1"].includes(new URL(base).hostname),
@@ -128,6 +129,7 @@ try {
       ),
     { timeout: 30000 },
   );
+  await verifyFolderUpload(page, browser, temporary, base, click);
   for (const route of ["/", "/deployments", "/tokens", "/system", "/upload"]) {
     await page.goto(base + route, { waitUntil: "networkidle0" });
     assert.equal(
@@ -186,6 +188,9 @@ try {
         "public content",
         "preview fragment exchange",
         "pause and resume dialogs",
+        "native folder drop with 108 files and nested assets",
+        "directory picker with one nested file",
+        "empty folder and required-field feedback",
         "all routes",
         "dark/light theme",
         "390px mobile layout",
