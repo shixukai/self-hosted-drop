@@ -1,0 +1,2802 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Self-hosted Drop API",
+    "version": "0.1.0",
+    "description": "Single-administrator static publishing. HTML executes only in the visitor browser. All paths below are on the dedicated admin origin; Caddy content/preview endpoints are separate."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "sessionCookie": []
+    },
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/setup/status": {
+      "get": {
+        "summary": "Check whether administrator setup is complete",
+        "operationId": "get_setup_status",
+        "responses": {
+          "200": {
+            "description": "Check whether administrator setup is complete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generic"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/setup": {
+      "post": {
+        "summary": "Initialize the single administrator",
+        "operationId": "post_setup",
+        "responses": {
+          "201": {
+            "description": "Initialize the single administrator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "key",
+                  "password"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "summary": "Create administrator session",
+        "operationId": "post_auth_login",
+        "responses": {
+          "200": {
+            "description": "Create administrator session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "password"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "summary": "Read current session and CSRF token",
+        "operationId": "get_auth_session",
+        "responses": {
+          "200": {
+            "description": "Read current session and CSRF token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "summary": "Invalidate current session",
+        "operationId": "post_auth_logout",
+        "responses": {
+          "204": {
+            "description": "Invalidate current session"
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ]
+      }
+    },
+    "/auth/password": {
+      "post": {
+        "summary": "Change password and invalidate all sessions",
+        "operationId": "post_auth_password",
+        "responses": {
+          "204": {
+            "description": "Change password and invalidate all sessions"
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "currentPassword": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "maxLength": 256
+                  }
+                },
+                "required": [
+                  "currentPassword",
+                  "password"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sites": {
+      "get": {
+        "summary": "List permitted sites",
+        "operationId": "get_sites",
+        "responses": {
+          "200": {
+            "description": "List permitted sites",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Site"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Opaque, filter-bound pagination cursor"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "DRAFT",
+                "ACTIVE",
+                "PAUSED",
+                "DELETED"
+              ]
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create a site (administrator)",
+        "operationId": "post_sites",
+        "responses": {
+          "201": {
+            "description": "Create a site (administrator)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Site"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "slug": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "slug",
+                  "name"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sites/{site}": {
+      "get": {
+        "summary": "Get a site",
+        "operationId": "get_sites_site",
+        "responses": {
+          "200": {
+            "description": "Get a site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Site"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "summary": "Edit display metadata",
+        "operationId": "patch_sites_site",
+        "responses": {
+          "200": {
+            "description": "Edit display metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Site"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Move site to trash (confirmSlug required)",
+        "operationId": "delete_sites_site",
+        "responses": {
+          "202": {
+            "description": "Move site to trash (confirmSlug required)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteOperation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sites/{site}/deployments": {
+      "get": {
+        "summary": "List deployments",
+        "operationId": "get_sites_site_deployments",
+        "responses": {
+          "200": {
+            "description": "List deployments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Deployment"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Opaque, filter-bound pagination cursor"
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Stream one HTML or ZIP artifact",
+        "operationId": "post_sites_site_deployments",
+        "responses": {
+          "202": {
+            "description": "Stream one HTML or ZIP artifact",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deployment"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Multipart order is metadata (JSON text) then file. Maximum upload 200 MiB by default. Receipt/READY never changes the public route. Browser folders are zipped in a Web Worker.",
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "metadata": {
+                    "type": "string",
+                    "description": "JSON-encoded Metadata; this part MUST come first."
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                },
+                "required": [
+                  "metadata",
+                  "file"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deployments/{deployment}": {
+      "get": {
+        "summary": "Get inspection and deployment state",
+        "operationId": "get_deployments_deployment",
+        "responses": {
+          "200": {
+            "description": "Get inspection and deployment state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deployment"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "deployment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ]
+      }
+    },
+    "/deployments/{deployment}/files": {
+      "get": {
+        "summary": "List inspected files",
+        "operationId": "get_deployments_deployment_files",
+        "responses": {
+          "200": {
+            "description": "List inspected files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/File"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "deployment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Opaque, filter-bound pagination cursor"
+            }
+          }
+        ]
+      }
+    },
+    "/deployments/{deployment}/selection": {
+      "post": {
+        "summary": "Choose entry and requeue inspection",
+        "operationId": "post_deployments_deployment_selection",
+        "responses": {
+          "202": {
+            "description": "Choose entry and requeue inspection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generic"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "deployment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rootDirectory": {
+                    "type": "string"
+                  },
+                  "entryPath": {
+                    "type": "string"
+                  },
+                  "routingMode": {
+                    "type": "string",
+                    "enum": [
+                      "static",
+                      "spa"
+                    ]
+                  },
+                  "inspectionRevision": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "rootDirectory",
+                  "entryPath",
+                  "routingMode",
+                  "inspectionRevision"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deployments/{deployment}/cancel": {
+      "post": {
+        "summary": "Cancel processing before READY",
+        "operationId": "post_deployments_deployment_cancel",
+        "responses": {
+          "202": {
+            "description": "Cancel processing before READY",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generic"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "deployment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ]
+      }
+    },
+    "/deployments/{deployment}/retention": {
+      "patch": {
+        "summary": "Pin or unpin an available artifact",
+        "operationId": "patch_deployments_deployment_retention",
+        "responses": {
+          "200": {
+            "description": "Pin or unpin an available artifact",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Deployment"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "deployment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pinned": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pinned"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deployments/{deployment}/export": {
+      "get": {
+        "summary": "Export verified content and metadata",
+        "operationId": "get_deployments_deployment_export",
+        "responses": {
+          "200": {
+            "description": "Export verified content and metadata",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "deployment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ]
+      }
+    },
+    "/sites/{site}/publications": {
+      "post": {
+        "summary": "Accept a publish or rollback intent",
+        "operationId": "post_sites_site_publications",
+        "responses": {
+          "202": {
+            "description": "Accept a publish or rollback intent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationInput"
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List route operations",
+        "operationId": "get_sites_site_publications",
+        "responses": {
+          "200": {
+            "description": "List route operations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Publication"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Opaque, filter-bound pagination cursor"
+            }
+          },
+          {
+            "name": "deployment",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ]
+      }
+    },
+    "/publications/{publication}": {
+      "get": {
+        "summary": "Poll confirmed route outcome",
+        "operationId": "get_publications_publication",
+        "responses": {
+          "200": {
+            "description": "Poll confirmed route outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "publication",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        ]
+      }
+    },
+    "/sites/{site}/pause": {
+      "post": {
+        "summary": "Pause site through publication coordinator",
+        "operationId": "post_sites_site_pause",
+        "responses": {
+          "202": {
+            "description": "Pause site through publication coordinator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteOperation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sites/{site}/resume": {
+      "post": {
+        "summary": "Resume site through publication coordinator",
+        "operationId": "post_sites_site_resume",
+        "responses": {
+          "202": {
+            "description": "Resume site through publication coordinator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteOperation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sites/{site}/restore": {
+      "post": {
+        "summary": "Restore site through publication coordinator",
+        "operationId": "post_sites_site_restore",
+        "responses": {
+          "202": {
+            "description": "Restore site through publication coordinator",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteOperation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sites/{site}/purge": {
+      "post": {
+        "summary": "Collect eligible trash artifacts; pins and grace period still apply",
+        "operationId": "post_sites_site_purge",
+        "responses": {
+          "202": {
+            "description": "Collect eligible trash artifacts; pins and grace period still apply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generic"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "site",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteOperation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens": {
+      "get": {
+        "summary": "List token metadata (administrator)",
+        "operationId": "get_tokens",
+        "responses": {
+          "200": {
+            "description": "List token metadata (administrator)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Token"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create scoped token; raw secret is returned once",
+        "operationId": "post_tokens",
+        "responses": {
+          "201": {
+            "description": "Create scoped token; raw secret is returned once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generic"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tokens/{token}": {
+      "delete": {
+        "summary": "Revoke token immediately",
+        "operationId": "delete_tokens_token",
+        "responses": {
+          "204": {
+            "description": "Revoke token immediately"
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ]
+      }
+    },
+    "/deployments/{deployment}/preview-grants": {
+      "post": {
+        "summary": "Create one-hour, one-use preview link",
+        "operationId": "post_deployments_deployment_preview-grants",
+        "responses": {
+          "201": {
+            "description": "Create one-hour, one-use preview link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewGrant"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "deployment",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ]
+      }
+    },
+    "/preview-grants/{grant}": {
+      "delete": {
+        "summary": "Revoke a preview grant and its sessions",
+        "operationId": "delete_preview-grants_grant",
+        "responses": {
+          "204": {
+            "description": "Revoke a preview grant and its sessions"
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "grant",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ]
+      }
+    },
+    "/system/status": {
+      "get": {
+        "summary": "Read runtime storage and dependency status",
+        "operationId": "get_system_status",
+        "responses": {
+          "200": {
+            "description": "Read runtime storage and dependency status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/audit": {
+      "get": {
+        "summary": "Read audit events",
+        "operationId": "get_system_audit",
+        "responses": {
+          "200": {
+            "description": "Read audit events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Generic"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Opaque, filter-bound pagination cursor"
+            }
+          }
+        ]
+      }
+    },
+    "/system/backups": {
+      "get": {
+        "summary": "Read last 100 backup runs",
+        "operationId": "get_system_backups",
+        "responses": {
+          "200": {
+            "description": "Read last 100 backup runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Generic"
+                      }
+                    },
+                    "nextCursor": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/system/settings": {
+      "get": {
+        "summary": "Read retention settings and revision",
+        "operationId": "get_system_settings",
+        "responses": {
+          "200": {
+            "description": "Read retention settings and revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generic"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Extend retention using compare-and-swap revision",
+        "operationId": "patch_system_settings",
+        "responses": {
+          "200": {
+            "description": "Extend retention using compare-and-swap revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Generic"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Structured error. 401 authentication; 403 permission/CSRF; 404 unknown; 409 state/idempotency conflict; 413 upload size; 422 validation; 429 queue/quota/rate limit; 503 dependency; 507 disk headroom.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "X-CSRF-Token",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Required with the admin session cookie. Origin must equal DROP_ADMIN_ORIGIN."
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "description": "Supported for upload, entry selection and publication intents. Reusing a key with different content returns 409."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "revision": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 0
+                  },
+                  "value": {
+                    "type": "object",
+                    "properties": {
+                      "retainVersions": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      },
+                      "trashDays": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 365
+                      }
+                    },
+                    "required": [
+                      "retainVersions",
+                      "trashDays"
+                    ]
+                  }
+                },
+                "required": [
+                  "revision",
+                  "value"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-drop_session",
+        "description": "Development uses drop_session_dev; writes also require CSRF and exact Origin."
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "administrator": {
+            "type": "boolean"
+          },
+          "csrfToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "administrator",
+          "csrfToken"
+        ]
+      },
+      "Site": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "ACTIVE",
+              "PAUSED",
+              "DELETED"
+            ]
+          },
+          "desiredStatus": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "appliedGeneration": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "appliedDeploymentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "deploymentCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "File": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "size",
+          "sha256"
+        ]
+      },
+      "Warning": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Candidate": {
+        "type": "object",
+        "properties": {
+          "rootDirectory": {
+            "type": "string"
+          },
+          "entryPath": {
+            "type": "string"
+          }
+        }
+      },
+      "Metadata": {
+        "type": "object",
+        "properties": {
+          "rootDirectory": {
+            "type": "string",
+            "default": ""
+          },
+          "entryPath": {
+            "type": "string",
+            "default": ""
+          },
+          "routingMode": {
+            "type": "string",
+            "enum": [
+              "static",
+              "spa"
+            ],
+            "default": "static"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "interactionMode": {
+            "type": "string",
+            "enum": [
+              "strict",
+              "interactive"
+            ],
+            "default": "strict"
+          },
+          "publishAfterReady": {
+            "type": "boolean",
+            "default": false
+          },
+          "warningsPolicy": {
+            "type": "string",
+            "enum": [
+              "require_ack",
+              "allow"
+            ],
+            "default": "require_ack"
+          },
+          "expectedGeneration": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Report": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/File"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Warning"
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Candidate"
+            }
+          },
+          "rootDirectory": {
+            "type": "string"
+          },
+          "entryPath": {
+            "type": "string"
+          },
+          "routingMode": {
+            "type": "string"
+          },
+          "inspectionReportHash": {
+            "type": "string"
+          },
+          "artifactHash": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "expandedBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Deployment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "siteId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "RECEIVING",
+              "QUEUED",
+              "VALIDATING",
+              "EXTRACTING",
+              "CHECKING",
+              "AWAITING_INPUT",
+              "READY",
+              "FAILED",
+              "CANCELED"
+            ]
+          },
+          "artifactState": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "AVAILABLE",
+              "GC_PENDING",
+              "PURGED",
+              "CORRUPT"
+            ]
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          },
+          "report": {
+            "$ref": "#/components/schemas/Report"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/File"
+            }
+          },
+          "receivedBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "expandedBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "fileCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "errorCode": {
+            "type": "string"
+          },
+          "errorMessage": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Publication": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "siteId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "deploymentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "PUBLISH",
+              "ROLLBACK",
+              "PAUSE",
+              "RESUME",
+              "DELETE",
+              "RESTORE"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "APPLYING",
+              "APPLIED",
+              "FAILED",
+              "CONFLICT",
+              "RECOVERING",
+              "CANCELED"
+            ]
+          },
+          "targetGeneration": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "expectedGeneration": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "targetStatus": {
+            "type": "string"
+          },
+          "errorCode": {
+            "type": "string"
+          },
+          "errorMessage": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "appliedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PublicationInput": {
+        "type": "object",
+        "properties": {
+          "deploymentId": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "expectedGeneration": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "PUBLISH",
+              "ROLLBACK"
+            ],
+            "default": "PUBLISH"
+          },
+          "inspectionReportHash": {
+            "type": "string"
+          },
+          "acknowledgeWarnings": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "deploymentId",
+          "expectedGeneration",
+          "inspectionReportHash"
+        ]
+      },
+      "SiteOperation": {
+        "type": "object",
+        "properties": {
+          "expectedGeneration": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "confirmSlug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "expectedGeneration"
+        ]
+      },
+      "TokenInput": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "siteIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "sites:read",
+                "deployments:write",
+                "publications:write",
+                "previews:write",
+                "sites:manage",
+                "sites:delete"
+              ]
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "name",
+          "siteIds",
+          "scopes",
+          "expiresAt"
+        ]
+      },
+      "Token": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "siteIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "PreviewGrant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{32}$"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "One-use secret is in the URL fragment, never in a query parameter."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SystemStatus": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "usedBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "reservedBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "quotaBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "siteCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "queuedJobs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "diskFreeBytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "gatewayReady": {
+            "type": "boolean"
+          },
+          "latestVerifiedBackup": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "backupConfigured": {
+            "type": "boolean"
+          },
+          "adminOrigin": {
+            "type": "string"
+          },
+          "contentDomain": {
+            "type": "string"
+          }
+        }
+      },
+      "Generic": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  }
+}

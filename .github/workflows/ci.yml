@@ -1,0 +1,61 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Go unit tests and vet
+        run: |
+          go test -race ./...
+          go vet ./...
+      - name: Frontend build
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+      - name: Validate API contract and scripts
+        run: |
+          python3 scripts/generate-openapi.py
+          git diff --exit-code api/openapi.json
+          python3 -m py_compile scripts/*.py tests/*.py
+      - name: Prepare isolated stack
+        run: |
+          python3 scripts/init-secrets.py
+          python3 -c 'import pathlib,secrets; pathlib.Path(".secrets/test.password").write_text(secrets.token_urlsafe(32))'
+          docker compose up -d --build
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://localhost:18180/health/ready >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: API integration
+        run: python3 tests/integration.py --password-file .secrets/test.password --setup-key-file .secrets/setup.key
+      - name: Browser end to end
+        env:
+          CHROME_EXECUTABLE_PATH: /usr/bin/google-chrome
+          DROP_TEST_PASSWORD_FILE: ../.secrets/test.password
+        run: npm --prefix web run test:browser
+      - name: Restart durability
+        run: |
+          docker compose restart app worker caddy
+          sleep 8
+          docker compose exec -T app drop-entrypoint drop doctor
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail 100
+      - name: Stop test services
+        if: always()
+        run: docker compose down

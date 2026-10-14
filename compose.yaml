@@ -1,0 +1,130 @@
+name: self-hosted-drop
+services:
+  init-data:
+    image: alpine:3.23
+    command: [sh, -c, 'mkdir -p /data/uploads /data/quarantine /data/releases /data/runtime /config/caddy /backup-repository && chown 10001:10001 /data /data/uploads /data/quarantine /data/releases /data/runtime /config /config/caddy /backup-repository && chmod 0750 /data /data/*']
+    volumes:
+      - drop_data:/data
+      - caddy_config:/config
+      - backup_repository:/backup-repository
+    network_mode: none
+    restart: 'no'
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: drop
+      POSTGRES_USER: drop
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_key
+    secrets: [postgres_key]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [database]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U drop -d drop]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+  app:
+    build: {context: ., target: app}
+    depends_on:
+      init-data: {condition: service_completed_successfully}
+      db: {condition: service_healthy}
+      worker: {condition: service_started}
+      caddy: {condition: service_started}
+    environment:
+      DROP_LISTEN: 0.0.0.0:18180
+      DROP_INTERNAL_LISTEN: 0.0.0.0:18181
+      DROP_DATA_DIR: /data
+      DROP_WEB_DIR: /opt/drop/web
+      DROP_ADMIN_ORIGIN: ${DROP_ADMIN_ORIGIN:-http://localhost:18180}
+      DROP_CONTENT_DOMAIN: ${DROP_CONTENT_DOMAIN:-drop.localhost:18080}
+      DROP_DEVELOPMENT_MODE: ${DROP_DEVELOPMENT_MODE:-true}
+      DROP_POSTGRES_HOST: db:5432
+      DROP_WORKER_URL: http://worker:18182
+      DROP_CADDY_ADMIN: http://caddy:2019
+      DROP_CADDY_CONTENT: http://caddy:8080
+      DROP_CADDY_PROBE: http://caddy:8081
+      DROP_CADDY_AUTH_ADDRESS: app:18181
+      DROP_CADDY_ROOT: /data/releases
+      DROP_QUOTA_BYTES: ${DROP_QUOTA_BYTES:-21474836480}
+      DROP_DISK_RESERVE_BYTES: ${DROP_DISK_RESERVE_BYTES:-5368709120}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-}
+    secrets: [postgres_key, setup_key, internal_key, worker_key, restic_key]
+    ports: ['127.0.0.1:${DROP_ADMIN_PORT:-18180}:18180']
+    volumes: [drop_data:/data, backup_repository:/backup-repository]
+    networks: [database, processing, gateway]
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: 1.5
+    pids_limit: 128
+    restart: unless-stopped
+  worker:
+    build: {context: ., target: worker}
+    depends_on:
+      init-data: {condition: service_completed_successfully}
+    environment:
+      DROP_DATA_DIR: /data
+      DROP_WORKER_LISTEN: 0.0.0.0:18182
+    secrets: [worker_key]
+    volumes:
+      - type: volume
+        source: drop_data
+        target: /data/uploads
+        volume: {subpath: uploads}
+    networks: [processing]
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 64
+    restart: unless-stopped
+  caddy:
+    image: caddy:2.11.7-alpine
+    depends_on:
+      init-data: {condition: service_completed_successfully}
+    user: '10001:10001'
+    entrypoint: [sh, /etc/caddy/start.sh]
+    volumes:
+      - type: volume
+        source: drop_data
+        target: /data/releases
+        read_only: true
+        volume: {subpath: releases}
+      - caddy_config:/config
+      - ./deploy/caddy-bootstrap.json:/etc/caddy/bootstrap.json:ro
+      - ./deploy/caddy-start.sh:/etc/caddy/start.sh:ro
+    ports: ['127.0.0.1:${DROP_CONTENT_PORT:-18080}:8080']
+    networks: [gateway]
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    environment: {XDG_DATA_HOME: /tmp/caddy}
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 128
+    restart: unless-stopped
+networks:
+  database: {internal: true}
+  processing: {internal: true}
+  gateway: {}
+volumes:
+  postgres_data: {}
+  drop_data: {}
+  caddy_config: {}
+  backup_repository: {}
+secrets:
+  postgres_key: {file: '${DROP_SECRETS_DIR:-.secrets}/postgres.key'}
+  setup_key: {file: '${DROP_SECRETS_DIR:-.secrets}/setup.key'}
+  internal_key: {file: '${DROP_SECRETS_DIR:-.secrets}/internal.key'}
+  worker_key: {file: '${DROP_SECRETS_DIR:-.secrets}/worker.key'}
+  restic_key: {file: '${DROP_SECRETS_DIR:-.secrets}/restic.key'}

@@ -1,0 +1,16 @@
+.git
+.local
+.data
+.secrets
+.env*
+node_modules
+**/node_modules
+**/dist
+bin
+design-preview
+docs
+__pycache__
+**/__pycache__
+*.key
+*.pem
+*.log
